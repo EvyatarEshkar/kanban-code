@@ -11,26 +11,38 @@ final class SystemTray: @unchecked Sendable {
     private var menu: NSMenu?
     private weak var boardState: BoardState?
     private var clawdProcess: Process?
+    /// Time when In Progress last had sessions (for linger timeout).
+    private var lastActiveTime: Date?
+    /// How long to keep tray visible after last active session (seconds).
+    var lingerTimeout: TimeInterval = 60
 
     func setup(boardState: BoardState) {
         self.boardState = boardState
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
-        // Use clawd icon as template image — load @2x for retina sharpness
-        if let iconURL = Bundle.module.url(forResource: "clawd@2x", withExtension: "png", subdirectory: "Resources"),
-           let image = NSImage(contentsOf: iconURL) {
-            image.isTemplate = true
-            image.size = NSSize(width: 18, height: 18) // logical size; 44px renders sharp on retina
-            statusItem?.button?.image = image
-        } else if let iconURL = Bundle.module.url(forResource: "clawd", withExtension: "png", subdirectory: "Resources"),
-                  let image = NSImage(contentsOf: iconURL) {
-            image.isTemplate = true
-            image.size = NSSize(width: 18, height: 18)
-            statusItem?.button?.image = image
+        // Build icon with 1x + 2x representations for crisp rendering at 22x22pt
+        // (same approach as cc-amphetamine's Electron nativeImage)
+        let icon = NSImage(size: NSSize(width: 22, height: 22))
+        var hasReps = false
+
+        if let url = Bundle.module.url(forResource: "clawd", withExtension: "png", subdirectory: "Resources"),
+           let rep = NSImageRep(contentsOf: url) {
+            rep.size = NSSize(width: 22, height: 22)
+            icon.addRepresentation(rep)
+            hasReps = true
+        }
+        if let url = Bundle.module.url(forResource: "clawd@2x", withExtension: "png", subdirectory: "Resources"),
+           let rep = NSImageRep(contentsOf: url) {
+            rep.size = NSSize(width: 22, height: 22) // same logical size; 44px used on retina
+            icon.addRepresentation(rep)
+            hasReps = true
+        }
+
+        if hasReps {
+            icon.isTemplate = true
+            statusItem?.button?.image = icon
         } else {
-            // Fallback to SF Symbol
             statusItem?.button?.image = NSImage(systemSymbolName: "rectangle.3.group", accessibilityDescription: "Kanban")
-            statusItem?.button?.image?.size = NSSize(width: 18, height: 18)
         }
 
         updateMenu()
@@ -99,16 +111,23 @@ final class SystemTray: @unchecked Sendable {
         NSApp.windows.first?.makeKeyAndOrderFront(nil)
     }
 
-    /// Show tray icon only when there are In Progress sessions.
+    /// Show tray icon when there are In Progress sessions, or within linger timeout.
     /// Also manages the "clawd" helper process for Amphetamine integration.
     private func updateVisibility() {
         guard let state = boardState else { return }
         let hasActive = state.cardCount(in: .inProgress) > 0
-        statusItem?.isVisible = hasActive
 
         if hasActive {
+            lastActiveTime = Date()
+            statusItem?.isVisible = true
             startClawdIfNeeded()
+        } else if let lastActive = lastActiveTime,
+                  Date().timeIntervalSince(lastActive) < lingerTimeout {
+            // Linger: keep visible for a bit after last active session
+            statusItem?.isVisible = true
+            // Keep clawd running during linger
         } else {
+            statusItem?.isVisible = false
             stopClawd()
         }
     }

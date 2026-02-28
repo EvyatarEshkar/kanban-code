@@ -10,6 +10,7 @@ struct ContentView: View {
     @State private var hookSetupError: String?
     private let coordinationStore: CoordinationStore
     private let systemTray = SystemTray()
+    private let hookEventsPath: String
 
     private var showInspector: Binding<Bool> {
         Binding(
@@ -42,6 +43,8 @@ struct ContentView: View {
         _boardState = State(initialValue: state)
         _orchestrator = State(initialValue: orch)
         self.coordinationStore = coordination
+        self.hookEventsPath = (NSHomeDirectory() as NSString)
+            .appendingPathComponent(".kanban/hook-events.jsonl")
     }
 
     private static func loadPushoverConfig() -> PushoverClient? {
@@ -70,6 +73,7 @@ struct ContentView: View {
     }
 
     var body: some View {
+        NavigationStack {
         BoardView(state: boardState)
             // Hook onboarding banner
             .overlay(alignment: .top) {
@@ -124,9 +128,14 @@ struct ContentView: View {
                 systemTray.update()
                 orchestrator.start()
             }
+            .task(id: "hook-watcher") {
+                // Watch hook-events.jsonl for changes → instant refresh
+                await watchHookEvents()
+            }
             .task(id: "refresh-timer") {
+                // Fallback periodic refresh for non-hook changes (new sessions, file mtime)
                 while !Task.isCancelled {
-                    try? await Task.sleep(for: .seconds(30))
+                    try? await Task.sleep(for: .seconds(15))
                     guard !Task.isCancelled else { break }
                     await boardState.refresh()
                     systemTray.update()
@@ -138,12 +147,69 @@ struct ContentView: View {
             .onReceive(NotificationCenter.default.publisher(for: .kanbanNewTask)) { _ in
                 showNewTask = true
             }
+            .toolbar {
+                // Left: actions pill
+                ToolbarItemGroup(placement: .navigation) {
+                    Button { showNewTask = true } label: {
+                        Image(systemName: "square.and.pencil")
+                    }
+                    .help("New task (⌘N)")
+
+                    Button { Task { await boardState.refresh() } } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .disabled(boardState.isLoading)
+                    .help("Refresh sessions")
+                }
+
+                // Center-left: title pill
+                ToolbarItem(placement: .principal) {
+                    Text("Kanban")
+                        .font(.headline)
+                        .padding(.horizontal, 6)
+                }
+
+                // Flexible spacer separates title and search into two pills
+                ToolbarSpacer(.flexible, placement: .principal)
+
+                // Center-right: search pill
+                ToolbarItem(placement: .principal) {
+                    Button { showSearch.toggle() } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "magnifyingglass")
+                            Text("Search")
+                            Text("⌘K")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(.quaternary, in: RoundedRectangle(cornerRadius: 4))
+                        }
+                        .padding(.horizontal, 4)
+                    }
+                    .help("Search sessions (⌘K)")
+                }
+
+                // Right: sidebar pill
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        if boardState.selectedCardId != nil {
+                            boardState.selectedCardId = nil
+                        }
+                    } label: {
+                        Image(systemName: "sidebar.right")
+                    }
+                    .disabled(boardState.selectedCardId == nil)
+                    .opacity(boardState.selectedCardId != nil ? 1.0 : 0.3)
+                    .help("Toggle session details")
+                }
+            }
             .background {
-                WindowToolbarInstaller(boardState: boardState)
                 Button("") { showSearch.toggle() }
                     .keyboardShortcut("k", modifiers: .command)
                     .hidden()
             }
+        } // NavigationStack
     }
 
     private var hookOnboardingBanner: some View {
@@ -193,6 +259,51 @@ struct ContentView: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
         .padding(.horizontal, 16)
         .padding(.top, 8)
+    }
+
+    /// Watch ~/.kanban/hook-events.jsonl for writes → trigger immediate orchestrator tick + board refresh.
+    private func watchHookEvents() async {
+        // Ensure the directory exists
+        let dir = (hookEventsPath as NSString).deletingLastPathComponent
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+
+        // Ensure the file exists
+        if !FileManager.default.fileExists(atPath: hookEventsPath) {
+            FileManager.default.createFile(atPath: hookEventsPath, contents: nil)
+        }
+
+        guard let fd = open(hookEventsPath, O_EVTONLY) as Int32?,
+              fd >= 0 else { return }
+        defer { close(fd) }
+
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd,
+            eventMask: [.write, .extend],
+            queue: .global(qos: .userInitiated)
+        )
+
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            source.setEventHandler {
+                Task { @MainActor in
+                    // Process new hook events through orchestrator, then refresh board
+                    await self.orchestrator.tick()
+                    await self.boardState.refresh()
+                    self.systemTray.update()
+                }
+            }
+            source.setCancelHandler {
+                continuation.resume()
+            }
+            source.resume()
+
+            // Keep alive until task is cancelled
+            Task {
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(60))
+                }
+                source.cancel()
+            }
+        }
     }
 
     private func createManualTask(title: String, description: String, projectPath: String?) {
