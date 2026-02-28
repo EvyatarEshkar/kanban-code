@@ -290,6 +290,22 @@ struct OnboardingWizard: View {
                 statusCheckRow("wkhtmltoimage", done: status?.wkhtmltoimageAvailable ?? false)
                 statusCheckRow("tmux", done: status?.tmuxAvailable ?? false)
                 statusCheckRow("GitHub CLI (gh)", done: status?.ghAvailable ?? false)
+                if status?.ghAvailable == true && !(status?.ghAuthenticated ?? false) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .foregroundStyle(.orange)
+                        Text("gh is installed but not logged in. Run")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("gh auth login")
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.primary)
+                        Text("in a terminal.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.leading, 24)
+                }
                 statusCheckRow("Mutagen", done: status?.mutagenAvailable ?? false)
             }
 
@@ -421,7 +437,7 @@ struct OnboardingWizard: View {
                     summaryRow("wkhtmltoimage", status: status?.wkhtmltoimageAvailable ?? false)
                     summaryRow("Pushover", status: status?.pushoverConfigured ?? false)
                     summaryRow("tmux", status: status?.tmuxAvailable ?? false)
-                    summaryRow("GitHub CLI", status: status?.ghAvailable ?? false)
+                    summaryRow("GitHub CLI", status: status?.ghAuthenticated ?? false)
                     summaryRow("Mutagen", status: status?.mutagenAvailable ?? false)
                 }
 

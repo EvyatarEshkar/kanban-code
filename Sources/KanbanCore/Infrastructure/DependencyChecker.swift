@@ -10,13 +10,15 @@ public enum DependencyChecker {
         public let wkhtmltoimageAvailable: Bool
         public let pushoverConfigured: Bool
         public let ghAvailable: Bool
+        public let ghAuthenticated: Bool
         public let tmuxAvailable: Bool
         public let mutagenAvailable: Bool
 
         public init(
             claudeAvailable: Bool, hooksInstalled: Bool, pandocAvailable: Bool,
             wkhtmltoimageAvailable: Bool, pushoverConfigured: Bool,
-            ghAvailable: Bool, tmuxAvailable: Bool, mutagenAvailable: Bool
+            ghAvailable: Bool, ghAuthenticated: Bool = false,
+            tmuxAvailable: Bool, mutagenAvailable: Bool
         ) {
             self.claudeAvailable = claudeAvailable
             self.hooksInstalled = hooksInstalled
@@ -24,6 +26,7 @@ public enum DependencyChecker {
             self.wkhtmltoimageAvailable = wkhtmltoimageAvailable
             self.pushoverConfigured = pushoverConfigured
             self.ghAvailable = ghAvailable
+            self.ghAuthenticated = ghAuthenticated
             self.tmuxAvailable = tmuxAvailable
             self.mutagenAvailable = mutagenAvailable
         }
@@ -36,6 +39,7 @@ public enum DependencyChecker {
         async let pandoc = ShellCommand.isAvailable("pandoc")
         async let wkhtmltoimage = ShellCommand.isAvailable("wkhtmltoimage")
         async let gh = ShellCommand.isAvailable("gh")
+        async let ghAuth = checkGhAuth()
         async let tmux = ShellCommand.isAvailable("tmux")
         async let mutagen = ShellCommand.isAvailable("mutagen")
 
@@ -55,8 +59,17 @@ public enum DependencyChecker {
             wkhtmltoimageAvailable: wkhtmltoimage,
             pushoverConfigured: pushover,
             ghAvailable: gh,
+            ghAuthenticated: ghAuth,
             tmuxAvailable: tmux,
             mutagenAvailable: mutagen
         )
+    }
+
+    /// Check if `gh` CLI is authenticated (exit code 0 = logged in).
+    private static func checkGhAuth() async -> Bool {
+        guard let result = try? await ShellCommand.run("/usr/bin/env", arguments: ["gh", "auth", "status"]) else {
+            return false
+        }
+        return result.succeeded
     }
 }

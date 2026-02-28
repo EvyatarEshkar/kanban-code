@@ -40,6 +40,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         if let window = NSApp.windows.first {
             window.makeKeyAndOrderFront(nil)
         }
+
+        // Set app icon from bundled resource (SPM uses Bundle.module)
+        if let iconURL = Bundle.module.url(forResource: "AppIcon", withExtension: "icns", subdirectory: "Resources"),
+           let icon = NSImage(contentsOf: iconURL) {
+            NSApp.applicationIconImage = icon
+        }
     }
 }
 
