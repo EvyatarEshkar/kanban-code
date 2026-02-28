@@ -52,12 +52,12 @@ public enum AssignColumn {
         }
 
         // GitHub issue source without a session yet → backlog
-        if link.source == .githubIssue && link.sessionId == nil {
+        if link.source == .githubIssue && link.sessionLink == nil {
             return .backlog
         }
 
         // Manual task without a session yet → backlog
-        if link.source == .manual && link.sessionId == nil {
+        if link.source == .manual && link.sessionLink == nil {
             return .backlog
         }
 

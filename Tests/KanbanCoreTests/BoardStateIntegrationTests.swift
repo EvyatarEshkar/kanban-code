@@ -70,7 +70,7 @@ struct BoardStateIntegrationTests {
         // Card ID is the link's UUID, not the session's UUID
         let card = state.cards[0]
         #expect(card.id == card.link.id)
-        #expect(card.link.sessionId == "my-session-uuid")
+        #expect(card.link.sessionLink?.sessionId == "my-session-uuid")
     }
 
     @Test("selectedCardId survives refresh when card still exists")
@@ -86,7 +86,7 @@ struct BoardStateIntegrationTests {
         let state = BoardState(discovery: discovery, coordinationStore: store)
 
         await state.refresh()
-        let cardId = state.cards.first(where: { $0.link.sessionId == "s1" })!.id
+        let cardId = state.cards.first(where: { $0.link.sessionLink?.sessionId == "s1" })!.id
         state.selectedCardId = cardId
 
         await state.refresh()
@@ -107,7 +107,7 @@ struct BoardStateIntegrationTests {
         let state = BoardState(discovery: discovery, coordinationStore: store)
 
         await state.refresh()
-        let cardId = state.cards.first(where: { $0.link.sessionId == "s1" })!.id
+        let cardId = state.cards.first(where: { $0.link.sessionLink?.sessionId == "s1" })!.id
         state.selectedCardId = cardId
 
         // Session disappears from discovery AND we clear it from the store
@@ -132,7 +132,7 @@ struct BoardStateIntegrationTests {
         let state = BoardState(discovery: discovery, coordinationStore: store)
 
         await state.refresh()
-        let cardId = state.cards.first(where: { $0.link.sessionId == "s1" })!.id
+        let cardId = state.cards.first(where: { $0.link.sessionLink?.sessionId == "s1" })!.id
         state.selectedCardId = cardId
 
         // Session temporarily disappears from discovery (e.g. file locked)
@@ -164,7 +164,7 @@ struct BoardStateIntegrationTests {
         #expect(state.cards.count == 1)
 
         // Find card by sessionId to get its actual link.id
-        let cardId = state.cards.first(where: { $0.link.sessionId == "s1" })!.id
+        let cardId = state.cards.first(where: { $0.link.sessionLink?.sessionId == "s1" })!.id
 
         // Rename the card
         state.renameCard(cardId: cardId, name: "My Custom Name")
@@ -179,7 +179,7 @@ struct BoardStateIntegrationTests {
         await state.refresh()
 
         // Name should survive
-        let card = state.cards.first(where: { $0.link.sessionId == "s1" })
+        let card = state.cards.first(where: { $0.link.sessionLink?.sessionId == "s1" })
         #expect(card?.link.name == "My Custom Name")
         #expect(card?.link.manualOverrides.name == true)
         #expect(card?.displayTitle == "My Custom Name")
@@ -198,7 +198,7 @@ struct BoardStateIntegrationTests {
         let state = BoardState(discovery: discovery, coordinationStore: store)
 
         await state.refresh()
-        let cardId = state.cards.first(where: { $0.link.sessionId == "s1" })!.id
+        let cardId = state.cards.first(where: { $0.link.sessionLink?.sessionId == "s1" })!.id
         state.renameCard(cardId: cardId, name: "Renamed")
         try await Task.sleep(for: .milliseconds(100))
 
@@ -223,14 +223,14 @@ struct BoardStateIntegrationTests {
         let state = BoardState(discovery: discovery, coordinationStore: store)
 
         await state.refresh()
-        let cardId = state.cards.first(where: { $0.link.sessionId == "s1" })!.id
+        let cardId = state.cards.first(where: { $0.link.sessionLink?.sessionId == "s1" })!.id
         state.moveCard(cardId: cardId, to: .inProgress)
         try await Task.sleep(for: .milliseconds(100))
 
         // Refresh
         await state.refresh()
 
-        let card = state.cards.first(where: { $0.link.sessionId == "s1" })
+        let card = state.cards.first(where: { $0.link.sessionLink?.sessionId == "s1" })
         #expect(card?.link.column == .inProgress)
         #expect(card?.link.manualOverrides.column == true)
     }
@@ -279,7 +279,7 @@ struct BoardStateIntegrationTests {
         let state = BoardState(discovery: discovery, coordinationStore: store)
 
         await state.refresh()
-        let cardId = state.cards.first(where: { $0.link.sessionId == "s1" })!.id
+        let cardId = state.cards.first(where: { $0.link.sessionLink?.sessionId == "s1" })!.id
         state.archiveCard(cardId: cardId)
 
         // In-memory: card should be allSessions and manuallyArchived
@@ -292,7 +292,7 @@ struct BoardStateIntegrationTests {
 
         // Persists through refresh
         await state.refresh()
-        let refreshed = state.cards.first(where: { $0.link.sessionId == "s1" })
+        let refreshed = state.cards.first(where: { $0.link.sessionLink?.sessionId == "s1" })
         #expect(refreshed?.link.manuallyArchived == true)
         #expect(refreshed?.link.column == .allSessions)
     }
@@ -367,7 +367,7 @@ struct BoardStateIntegrationTests {
         await state.refresh()
         state.selectedProjectPath = "/projects/foo"
         #expect(state.filteredCards.count == 1)
-        #expect(state.filteredCards[0].link.sessionId == "s1")
+        #expect(state.filteredCards[0].link.sessionLink?.sessionId == "s1")
     }
 
     @Test("New sessions merge with existing persisted links")
@@ -383,7 +383,7 @@ struct BoardStateIntegrationTests {
         let state = BoardState(discovery: discovery, coordinationStore: store)
 
         await state.refresh()
-        let s1CardId = state.cards.first(where: { $0.link.sessionId == "s1" })!.id
+        let s1CardId = state.cards.first(where: { $0.link.sessionLink?.sessionId == "s1" })!.id
         state.renameCard(cardId: s1CardId, name: "Custom")
         try await Task.sleep(for: .milliseconds(100))
 
@@ -395,7 +395,7 @@ struct BoardStateIntegrationTests {
 
         // Both should exist, s1 should keep its name
         #expect(state.cards.count == 2)
-        let s1 = state.cards.first(where: { $0.link.sessionId == "s1" })
+        let s1 = state.cards.first(where: { $0.link.sessionLink?.sessionId == "s1" })
         #expect(s1?.link.name == "Custom")
     }
 }

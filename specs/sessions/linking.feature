@@ -1,181 +1,195 @@
-Feature: Session-Worktree-Tmux-PR Linking
+Feature: Card Reconciliation and Link Management
   As a developer with sessions started from various places
-  I want Kanban to intelligently link sessions, worktrees, tmux sessions, and PRs
-  So that my board accurately represents the state of all work
+  I want Kanban to intelligently match sessions, worktrees, tmux sessions, and PRs to existing cards
+  So that my board accurately represents the state of all work without duplicates
 
   Background:
     Given the Kanban application is running
-    And the background linking process is active
+    And the background reconciliation process is active
 
-  # ── Coordination File ──
+  # ── Core Reconciliation: Session → Card Matching ──
 
-  Scenario: Coordination file structure
-    Given the application has been used
-    Then a file should exist at ~/.kanban/links.json
-    And it should be human-readable JSON with entries like:
-      """json
-      {
-        "links": [
-          {
-            "id": "link-uuid",
-            "sessionId": "claude-session-uuid",
-            "worktreePath": "/path/to/worktree",
-            "worktreeBranch": "feat/issue-123",
-            "tmuxSession": "feat-issue-123",
-            "githubIssue": 123,
-            "githubPR": 456,
-            "projectPath": "/Users/rchaves/Projects/remote/langwatch-saas",
-            "column": "in_progress",
-            "name": "Custom session name",
-            "createdAt": "2026-02-28T10:00:00Z",
-            "updatedAt": "2026-02-28T10:30:00Z",
-            "manualOverrides": {},
-            "manuallyArchived": false
-          }
-        ]
-      }
-      """
+  Scenario: Discovered session matches existing card by sessionId
+    Given a card exists with sessionLink.sessionId = "abc-123"
+    When session discovery finds session "abc-123" with updated data
+    Then the existing card's sessionLink should be updated (path, timestamps)
+    And no new card should be created
 
-  Scenario: Coordination file is always readable
-    Given the coordination file exists
-    Then it should be valid JSON
-    And it should be inspectable with `cat ~/.kanban/links.json | jq`
-    And it should be editable by the user if needed
+  Scenario: Discovered session matches pending card via hook claim
+    Given a card was just launched (has tmuxLink but no sessionLink, updated < 60s ago)
+    When a SessionStart hook event fires with sessionId "new-session-uuid"
+    And no other card already has sessionLink.sessionId = "new-session-uuid"
+    Then the sessionLink should be added to the pending card
+    And the card should now be fully linked (tmux + session)
 
-  # ── Automatic Linking: Session → Worktree ──
+  Scenario: Discovered session has no matching card
+    Given no card has a sessionLink or tmuxLink matching the new session
+    When session discovery finds a new session "xyz-789"
+    Then a new card should be created with:
+      | Field                  | Value        |
+      | source                 | discovered   |
+      | sessionLink.sessionId  | xyz-789      |
+    And it should appear on the board
+
+  Scenario: Manual create + start + discovery produces exactly one card
+    Given I create a manual task "Fix login bug" with "Start immediately" checked
+    Then exactly one card should exist for this task
+    When the launch creates a tmux session
+    Then the existing card should gain a tmuxLink
+    When the SessionStart hook fires with the new Claude session UUID
+    Then the existing card should gain a sessionLink
+    When session discovery runs and finds the new session
+    Then the session should match the existing card by sessionId
+    And there should still be exactly one card (not 3!)
+
+  # ── Worktree Matching ──
 
   Scenario: Session started with --worktree flag
     Given Claude was started with `claude --worktree feat-123`
     When the session .jsonl contains cwd pointing to a worktree path
-    Then the session should be automatically linked to that worktree
-    And the branch should be extracted from the worktree
+    Then the card's worktreeLink should be set with the worktree path and branch
 
-  Scenario: Session without worktree but mentions branch in conversation
-    Given a Claude session is running on main (no --worktree)
-    And the conversation contains a message mentioning "worktree feat-login"
-    And no other link exists for "feat-login"
-    When the background heuristic scanner runs
-    Then it should attempt to match the branch name "feat-login"
-    And if a worktree exists with that branch, link them
+  Scenario: Orphan worktree creates a new card
+    Given a worktree exists at ~/Projects/remote/repo/.claude/worktrees/feat-auth
+    And no card has worktreeLink.branch matching "feat/auth"
+    When the reconciler scans worktrees
+    Then a new card should be created with:
+      | Field                | Value              |
+      | source               | discovered         |
+      | worktreeLink.path    | .../feat-auth      |
+      | worktreeLink.branch  | feat/auth          |
+      | column               | requires_attention |
+    And the card label should show "WORKTREE"
 
-  Scenario: Heuristic matching via exact branch name in conversation
-    Given a worktree exists at ~/Projects/remote/langwatch-saas/.claude/worktrees/feat-login
-    And a Claude session's transcript mentions "feat-login" exactly
-    And the session has no worktree link yet
-    Then the heuristic should propose this link
-    And the link should be created automatically
+  Scenario: Skip bare and main branch worktrees
+    Given the repo has a bare worktree and a main branch worktree
+    When the reconciler scans worktrees
+    Then no cards should be created for bare or main branch worktrees
 
-  Scenario: No false positive heuristic matches
-    Given a Claude session discusses "login" in general terms
-    And a worktree "feat-login" exists
-    Then the heuristic should NOT link them
-    Because "login" alone is not an exact branch/worktree name match
+  Scenario: Worktree already tracked by a card
+    Given a card exists with worktreeLink.branch = "feat/login"
+    When the reconciler finds a worktree with branch "feat/login"
+    Then it should verify/update the worktreeLink.path if needed
+    And not create a new card
 
-  # ── Automatic Linking: Worktree → tmux ──
-  # (Learned from git-orchard: path match first, then name match)
-
-  Scenario: tmux session matches worktree by path
-    Given a tmux session exists with session_path = "/path/to/worktree"
-    And a worktree exists at "/path/to/worktree"
-    Then they should be linked by exact path match (highest priority)
-
-  Scenario: tmux session matches worktree by directory name
-    Given a tmux session named "feat-login"
-    And a worktree at ~/Projects/remote/repo/.claude/worktrees/feat-login/
-    Then they should be linked by directory name match
-
-  Scenario: tmux session matches worktree by branch name
-    Given a tmux session named "feat-login"
-    And a worktree on branch "feat/login" (slash-to-dash normalization)
-    Then they should be linked because "feat/login" → "feat-login" matches
-
-  Scenario: Path match takes priority over name match
-    Given tmux session "wrong-name" has path "/correct/worktree"
-    And worktree at "/correct/worktree" on branch "correct-branch"
-    Then the tmux session should be linked to the worktree
-    Because path match (priority 1) overrides name match (priority 2)
-
-  # ── Automatic Linking: Worktree → PR ──
-  # (Learned from git-orchard: branch name is the PR map key)
+  # ── PR Matching ──
 
   Scenario: PR linked by branch name
-    Given a worktree is on branch "feat/issue-123"
-    And a PR exists with head ref "feat/issue-123"
-    Then the PR should be automatically linked to the worktree/session
+    Given a card has worktreeLink.branch = "feat/issue-123"
+    And a PR exists with headRefName = "feat/issue-123"
+    When the reconciler matches PRs
+    Then a prLink should be added to the card with the PR number
 
-  Scenario: PR fetched via gh CLI
-    When the background process checks for PRs
-    Then it should use `gh pr list --state all --json headRefName,number,state,title,url,reviewDecision`
-    And cache the results as a Map<branchName, PrInfo>
+  Scenario: PR discovery does not create new cards
+    Given a PR exists for branch "feat/unknown"
+    And no card has a worktreeLink matching that branch
+    Then no new card should be created for the PR alone
+    Because PRs are attached to existing cards, not standalone
 
-  # ── Automatic Linking: PR → GitHub Issue ──
+  # ── GitHub Issue → Card Flow ──
 
-  Scenario: PR body references an issue
-    Given PR #456 has body containing "Closes #123"
-    When the PR is linked to a session
-    Then the GitHub issue #123 should also be linked
-    And if #123 was in the Backlog, the backlog card should be merged with the session card
+  Scenario: GitHub issue creates a backlog card with issueLink
+    Given a GitHub issue #123 "Fix login bug" is fetched
+    And no card has issueLink.number = 123 for this project
+    Then a new card should be created with:
+      | Field              | Value        |
+      | source             | github_issue |
+      | column             | backlog      |
+      | issueLink.number   | 123          |
+      | issueLink.body     | (issue body) |
+      | name               | #123: Fix login bug |
+
+  Scenario: Starting work on issue card adds session + tmux + worktree
+    Given a card with issueLink.number = 123 is in Backlog
+    When I click "Start" and the launch completes
+    Then the same card should gain:
+      | Link         | Value                          |
+      | tmuxLink     | sessionName = "issue-123"      |
+      | sessionLink  | (from SessionStart hook claim) |
+      | worktreeLink | (from Claude --worktree)       |
+    And the card should move to In Progress
+    And no second card should be created
+
+  Scenario: Issue already started is not duplicated on re-fetch
+    Given a card with issueLink.number = 123 also has a sessionLink
+    When the next GitHub fetch returns issue #123 again
+    Then the existing card should be kept as-is
+    And no duplicate card should be created
+
+  Scenario: Stale issue removed from backlog
+    Given a card with issueLink.number = 123 is in Backlog (no sessionLink)
+    When the GitHub fetch no longer returns issue #123
+    Then the card should be removed from the board
+
+  Scenario: Started issue not removed even if stale
+    Given a card with issueLink.number = 123 also has a sessionLink
+    When the GitHub fetch no longer returns issue #123
+    Then the card should NOT be removed
+    Because work has already started on it
+
+  # ── Dead Link Cleanup ──
+
+  Scenario: Tmux session dies
+    Given a card has tmuxLink.sessionName = "feat-login"
+    When "feat-login" is no longer in the live tmux session list
+    Then tmuxLink should be set to nil
+    But the card should remain with its other links intact
+
+  Scenario: Worktree deleted from disk
+    Given a card has worktreeLink.path = "/path/to/worktree"
+    And the path no longer exists on disk
+    When the reconciler runs
+    Then worktreeLink should be set to nil
+    Unless manualOverrides.worktreePath is true
+
+  Scenario: Session .jsonl file temporarily unavailable
+    Given a card has sessionLink.sessionPath pointing to a file
+    And the file is temporarily inaccessible (e.g., remote mount down)
+    When the reconciler runs
+    Then the sessionLink should NOT be cleared
+    Because sessions may be temporarily unavailable
 
   # ── Manual Override ──
 
   Scenario: User manually changes worktree link
-    Given a session is linked to worktree "feat-login"
-    When I click "Change worktree" on the card
-    And select a different worktree "feat-auth"
-    Then the link should update to "feat-auth"
-    And "manualOverrides.worktreePath" should be set to true
-    And the heuristic should not overwrite this manual link
-
-  Scenario: User manually links a tmux session
-    Given a session has no tmux link
-    When I click "Link tmux session"
-    And I see a list of unlinked tmux sessions
-    And I select "my-session"
-    Then the tmux session should be linked
-    And the link should be marked as manual
+    Given a card is linked to worktree "feat-login"
+    When I change the worktreeLink to a different worktree
+    Then manualOverrides.worktreePath should be set to true
+    And the reconciler should not overwrite this manual link
 
   Scenario: Manual overrides survive re-linking
-    Given a session has a manual worktree override
-    When the background linking process runs
-    Then it should skip the manually overridden field
-    And only update non-overridden fields
+    Given a card has manualOverrides.worktreePath = true
+    When the reconciler runs
+    Then it should skip updating the worktreeLink
+    And only update non-overridden links
 
-  # ── Multiple Sessions per Worktree ──
+  # ── Multiple Sessions per Branch ──
 
-  Scenario: Two sessions linked to the same worktree
+  Scenario: Two sessions linked to the same worktree branch
     Given I started a session in worktree "feat-login"
     And I later forked it, creating a second session in the same worktree
-    Then both sessions should appear as cards
-    And both should show the same worktree link
-    And the PR should appear on both cards
+    Then both sessions should appear as separate cards
+    And both should have worktreeLink.branch = "feat/login"
+    And the PR should appear on both cards (same prLink.number)
 
   # ── Session Switching Worktrees ──
 
-  Scenario: User switches worktree within a session
-    Given session "abc-123" was linked to worktree "feat-login"
-    And the user told Claude to switch to worktree "feat-auth"
-    When the background process detects cwd changed to a different worktree
-    Then the session link should update to "feat-auth"
-    Unless there is a manual override
+  Scenario: Session changes worktree
+    Given a card has sessionLink and worktreeLink.branch = "feat-login"
+    When the session's .jsonl shows cwd changed to a different worktree
+    Then worktreeLink should update to the new worktree
+    Unless manualOverrides.worktreePath is true
 
-  # ── No Worktree (working on main) ──
+  # ── Performance ──
 
-  Scenario: Session without a worktree
-    Given a Claude session is running in ~/Projects/remote/langwatch-saas (not a worktree)
-    Then the session should be tracked without a worktree link
-    And the branch should show as "main" (or whatever the current branch is)
-    And the card should still be fully functional
-
-  # ── Background Process Performance ──
-
-  Scenario: Linking process is lightweight
+  Scenario: Reconciliation is lightweight
     Given 50 active sessions and 200 archived sessions
-    When the background linking process runs
+    When the reconciler runs
     Then it should complete in under 500ms
     And it should not block the UI thread
-    And it should only re-scan sessions that changed since last run
+    And it should use indexed lookups (not O(n^2) scanning)
 
   Scenario: tmux session list is cached and refreshed
-    Given the linking process polls tmux sessions
+    Given the reconciler polls tmux sessions
     Then `tmux list-sessions` should be called at most every 5 seconds
     And the result should be cached between polls

@@ -22,16 +22,28 @@ Feature: GitHub Issues as Backlog Source
     And display a hint: "Uses `gh search issues` syntax"
     And examples like "assignee:@me repo:org/repo is:open label:bug"
 
-  Scenario: Multiple repositories via filter
-    Given the filter is "assignee:@me is:open"
-    When issues exist across multiple repos
-    Then all matching issues should appear in the backlog
-    And each card should show the repository name
+  # ── Card Structure for Issues ──
 
-  Scenario: Filtering by GitHub Project board
-    Given the filter is "project:myorg/myproject"
-    When the backlog refreshes
-    Then only issues from that project board should appear
+  Scenario: GitHub issues create cards with issueLink
+    When a GitHub issue #123 "Fix login bug" is fetched
+    Then a card should be created with:
+      | Field              | Value                              |
+      | id                 | card_<KSUID>                       |
+      | source             | github_issue                       |
+      | column             | backlog                            |
+      | name               | #123: Fix login bug                |
+      | issueLink.number   | 123                                |
+      | issueLink.body     | (the issue body text)              |
+      | issueLink.url      | https://github.com/.../issues/123  |
+    And sessionLink, tmuxLink, worktreeLink, prLink should all be nil
+    And the card label should be "ISSUE" (orange)
+
+  Scenario: Issue card detail shows issue body
+    Given an issue card "#123: Fix login bug" is selected
+    Then the detail view should have a "Context" tab
+    And it should show the full issue body as scrollable text
+    And an "Open in Browser" button should link to the issue URL
+    And a "Start Work" button should be available
 
   # ── Fetching and Display ──
 
@@ -40,18 +52,14 @@ Feature: GitHub Issues as Backlog Source
     Then GitHub issues should be fetched via `gh search issues`
     And each issue should appear as a card in "Backlog" with:
       | Field       | Source              |
-      | Title       | Issue title         |
-      | Number      | Issue number (#123) |
-      | Repository  | repo name           |
+      | Title       | #number: Issue title|
       | Labels      | Issue labels        |
-      | Assignee    | Assignee avatar     |
 
-  Scenario: Issue already has a linked session
-    Given issue #123 is in the backlog
-    And a Claude session exists that is working on branch "issue-123"
-    When the linking process detects the match
-    Then the card should move from "Backlog" to the appropriate column
-    And the card should show the linked session
+  Scenario: Deduplication of GitHub issues
+    Given a card with issueLink.number = 123 exists for this project
+    When the next GitHub fetch also returns issue #123
+    Then the existing card should be kept
+    And no duplicate card should be created
 
   Scenario: Background polling for new issues
     Given the backlog was loaded 5 minutes ago
@@ -59,11 +67,7 @@ Feature: GitHub Issues as Backlog Source
     Then new issues matching the filter should be fetched
     And new cards should appear in "Backlog"
     And stale issues (no longer matching) should be removed from "Backlog"
-    But started issues (moved out of Backlog) should not be removed
-
-  Scenario: Polling interval is configurable
-    Given settings has "github.pollIntervalSeconds": 120
-    Then the background fetch should happen every 120 seconds
+    But started issues (have sessionLink) should not be removed
 
   Scenario: Manual backlog refresh via column button
     Given the backlog column is visible
@@ -72,50 +76,65 @@ Feature: GitHub Issues as Backlog Source
     Then GitHub issues should be re-fetched immediately regardless of timer
     And the button should show a spinner while loading
 
-  Scenario: Deduplication of GitHub issues
-    Given issue #123 already exists as a Link with source=githubIssue
-    When the next GitHub fetch also returns issue #123
-    Then no duplicate Link should be created
-    And the existing card should be kept as-is
-
-  Scenario: GitHub issues create proper Link records
-    When a GitHub issue is fetched
-    Then a Link should be created with:
-      | Field         | Value                              |
-      | source        | github_issue                       |
-      | column        | backlog                            |
-      | githubIssue   | issue number                       |
-      | projectPath   | the project's path                 |
-      | name          | "#123: Issue title"                |
-      | issueBody     | the issue body text                |
-
   # ── Starting Work on an Issue ──
 
   Scenario: Start work on a GitHub issue
     Given issue "#123: Fix login bug" is in the Backlog
     When I click "Start" on the card
-    Then a tmux session should be created named "issue-123"
-    And Claude should be launched with:
-      | Flag        | Value                                    |
-      | --worktree  | issue-123                                |
-      | prompt      | /orchestrate Fix login bug (issue #123)  |
-    And the card should move to "In Progress"
+    Then the launch confirmation dialog should appear
+    And the prompt should be built from templates:
+      | Template                    | Applied to                      |
+      | githubIssuePromptTemplate   | Issue title, number, body       |
+      | promptTemplate              | Wraps the result                |
+    And I can edit the prompt before launching
 
-  Scenario: Skill prefix is configurable
-    Given settings has "skill": "/orchestrate"
+  Scenario: Issue prompt template rendering
+    Given the githubIssuePromptTemplate is "#${number}: ${title}\n\n${body}"
+    And the promptTemplate is "/orchestrate ${prompt}"
+    And issue #123 has title "Fix login bug" and body "Users get redirected..."
+    Then the rendered prompt should be:
+      """
+      /orchestrate #123: Fix login bug
+
+      Users get redirected...
+      """
+
+  Scenario: Launching adds links to existing issue card
+    Given I started work on issue #123 from the launch confirmation dialog
+    Then the EXISTING card (with issueLink.number = 123) should gain:
+      | Link         | Value                          |
+      | tmuxLink     | sessionName = "issue-123"      |
+      | sessionLink  | (added via SessionStart hook)  |
+      | worktreeLink | (added when worktree created)  |
+    And the card should move from Backlog to In Progress
+    And the label should change from "ISSUE" to "SESSION"
+    And there should still be exactly one card
+
+  # ── Prompt Templates ──
+
+  Scenario: Default prompt template
+    Given no custom promptTemplate is configured
+    Then the default promptTemplate should be "${prompt}"
+    And the prompt should be sent as-is to Claude
+
+  Scenario: Custom prompt template wraps the issue
+    Given settings has promptTemplate = "/orchestrate ${prompt}"
     When I start a GitHub issue
     Then the prompt should be prepended with "/orchestrate"
 
-  Scenario: No skill prefix configured
-    Given settings has no "skill" configured
-    When I start a GitHub issue
-    Then the prompt should just be the issue title and body
+  Scenario: Per-project prompt template override
+    Given project "LangWatch" has promptTemplate = "/orchestrate ${prompt}"
+    And project "SideProject" has no promptTemplate (inherits global)
+    When I start a LangWatch issue
+    Then the project's template should be used
+    When I start a SideProject issue
+    Then the global template should be used
 
-  Scenario: Issue body is included in prompt
-    Given issue #123 has a body with acceptance criteria
-    When I start working on it
-    Then the full issue body should be included in the Claude prompt
-    And it should be fetched via `gh issue view 123 --json title,body`
+  Scenario: GitHub issue prompt template
+    Given settings has githubIssuePromptTemplate = "Fix issue #${number}: ${title}\n\nDetails:\n${body}"
+    When building a prompt for issue #42 "Add dark mode"
+    Then the issue template should render first
+    Then the result should be wrapped by promptTemplate
 
   # ── Edge Cases ──
 
@@ -150,7 +169,6 @@ Feature: GitHub Issues as Backlog Source
     Given project "LangWatch" has githubFilter "assignee:@me repo:langwatch/langwatch is:open"
     When I select the LangWatch project view
     Then the backlog should only show issues matching that filter
-    And not issues from other repos
 
   Scenario: Global view combines per-project filters
     Given "LangWatch" has filter "repo:langwatch/langwatch"

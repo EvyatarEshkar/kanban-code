@@ -10,6 +10,11 @@ struct ContentView: View {
     @AppStorage("appearanceMode") private var appearanceMode: AppearanceMode = .auto
     @State private var showAddFromPath = false
     @State private var addFromPathText = ""
+    @State private var showLaunchConfirmation = false
+    @State private var launchCardId: String?
+    @State private var launchPrompt: String = ""
+    @State private var launchProjectPath: String = ""
+    @State private var launchWorktreeName: String?
     @AppStorage("selectedProject") private var selectedProjectPersisted: String = ""
     private let coordinationStore: CoordinationStore
     private let settingsStore: SettingsStore
@@ -124,12 +129,25 @@ struct ContentView: View {
                     isPresented: $showNewTask,
                     projects: boardState.configuredProjects,
                     defaultProjectPath: boardState.selectedProjectPath
-                ) { title, description, projectPath, startImmediately in
-                    createManualTask(title: title, description: description, projectPath: projectPath, startImmediately: startImmediately)
+                ) { prompt, projectPath, startImmediately in
+                    createManualTask(prompt: prompt, projectPath: projectPath, startImmediately: startImmediately)
                 }
             }
             .sheet(isPresented: $showAddFromPath) {
                 addFromPathSheet
+            }
+            .sheet(isPresented: $showLaunchConfirmation) {
+                LaunchConfirmationDialog(
+                    cardId: launchCardId ?? "",
+                    projectPath: launchProjectPath,
+                    initialPrompt: launchPrompt,
+                    worktreeName: launchWorktreeName,
+                    isPresented: $showLaunchConfirmation
+                ) { editedPrompt, createWorktree in
+                    if let cardId = launchCardId {
+                        executeLaunch(cardId: cardId, prompt: editedPrompt, projectPath: launchProjectPath, worktreeName: createWorktree ? launchWorktreeName : nil)
+                    }
+                }
             }
             .sheet(isPresented: $showOnboarding) {
                 OnboardingWizard(
@@ -497,13 +515,16 @@ struct ContentView: View {
         }
     }
 
-    private func createManualTask(title: String, description: String, projectPath: String?, startImmediately: Bool = false) {
+    private func createManualTask(prompt: String, projectPath: String?, startImmediately: Bool = false) {
+        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let firstLine = trimmed.components(separatedBy: .newlines).first ?? trimmed
+        let name = String(firstLine.prefix(100))
         let link = Link(
+            name: name,
             projectPath: projectPath,
             column: startImmediately ? .inProgress : .backlog,
-            name: title,
             source: .manual,
-            issueBody: description.isEmpty ? nil : description
+            promptBody: trimmed
         )
         let linkId = link.id
         Task {
@@ -521,29 +542,32 @@ struct ContentView: View {
         guard let card = boardState.cards.first(where: { $0.id == cardId }) else { return }
         let projectPath = card.link.projectPath ?? NSHomeDirectory()
 
+        // Build prompt using PromptBuilder
+        Task {
+            let settings = try? await settingsStore.read()
+            let project = settings?.projects.first(where: { $0.path == projectPath })
+            let prompt = PromptBuilder.buildPrompt(card: card.link, project: project, settings: settings)
+
+            // Determine worktree name
+            let worktreeName: String?
+            if let issueNum = card.link.issueLink?.number {
+                worktreeName = "issue-\(issueNum)"
+            } else {
+                worktreeName = nil
+            }
+
+            // Show launch confirmation dialog
+            launchCardId = cardId
+            launchPrompt = prompt
+            launchProjectPath = projectPath
+            launchWorktreeName = worktreeName
+            showLaunchConfirmation = true
+        }
+    }
+
+    private func executeLaunch(cardId: String, prompt: String, projectPath: String, worktreeName: String?) {
         Task {
             do {
-                // Load skill prefix from settings
-                let settings = try? await settingsStore.read()
-                let skillPrefix = settings?.skill.isEmpty == false ? settings?.skill : nil
-
-                // Build prompt from card name + issue body
-                var prompt = card.displayTitle
-                if let body = card.link.issueBody, !body.isEmpty {
-                    prompt += "\n\n" + body
-                }
-                if let skillPrefix {
-                    prompt = skillPrefix + " " + prompt
-                }
-
-                // Determine worktree name
-                let worktreeName: String?
-                if let issueNum = card.link.githubIssue {
-                    worktreeName = "issue-\(issueNum)"
-                } else {
-                    worktreeName = nil // let claude auto-generate
-                }
-
                 let tmuxName = try await launcher.launch(
                     projectPath: projectPath,
                     prompt: prompt,
@@ -553,7 +577,7 @@ struct ContentView: View {
 
                 // Update the EXISTING link (by link.id) — no new link created
                 try? await coordinationStore.updateLink(id: cardId) { @Sendable link in
-                    link.tmuxSession = tmuxName
+                    link.tmuxLink = TmuxLink(sessionName: tmuxName)
                     link.column = .inProgress
                 }
                 boardState.setCardColumn(cardId: cardId, to: .inProgress)
@@ -566,7 +590,7 @@ struct ContentView: View {
 
     private func resumeCard(cardId: String) {
         guard let card = boardState.cards.first(where: { $0.id == cardId }) else { return }
-        let sessionId = card.link.sessionId ?? card.link.id
+        let sessionId = card.link.sessionLink?.sessionId ?? card.link.id
         let projectPath = card.link.projectPath ?? NSHomeDirectory()
 
         Task {
@@ -579,7 +603,7 @@ struct ContentView: View {
 
                 // Update link with tmux session (by link.id)
                 try? await coordinationStore.updateLink(id: cardId) { @Sendable link in
-                    link.tmuxSession = tmuxName
+                    link.tmuxLink = TmuxLink(sessionName: tmuxName)
                     if link.column != .inProgress {
                         link.column = .inProgress
                     }

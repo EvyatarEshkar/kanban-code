@@ -25,7 +25,7 @@ struct SettingsStoreTests {
         #expect(settings.github.defaultFilter == "assignee:@me is:open")
         #expect(settings.github.pollIntervalSeconds == 60)
         #expect(settings.sessionTimeout.activeThresholdMinutes == 1440)
-        #expect(settings.skill == "")
+        #expect(settings.promptTemplate == "")
 
         // File should exist now
         let filePath = (dir as NSString).appendingPathComponent("settings.json")
@@ -39,14 +39,14 @@ struct SettingsStoreTests {
         let store = SettingsStore(basePath: dir)
 
         var settings = Settings()
-        settings.skill = "/orchestrate"
+        settings.promptTemplate = "/orchestrate"
         settings.projects = [Project(path: "/test/project", name: "Test")]
         settings.notifications.pushoverToken = "tok_123"
 
         try await store.write(settings)
         let read = try await store.read()
 
-        #expect(read.skill == "/orchestrate")
+        #expect(read.promptTemplate == "/orchestrate")
         #expect(read.projects.count == 1)
         #expect(read.projects[0].name == "Test")
         #expect(read.notifications.pushoverToken == "tok_123")

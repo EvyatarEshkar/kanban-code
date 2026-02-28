@@ -8,7 +8,8 @@ public struct Settings: Codable, Sendable {
     public var notifications: NotificationSettings
     public var remote: RemoteSettings?
     public var sessionTimeout: SessionTimeoutSettings
-    public var skill: String
+    public var promptTemplate: String
+    public var githubIssuePromptTemplate: String
     public var columnOrder: [KanbanColumn]
     public var hasCompletedOnboarding: Bool
 
@@ -19,7 +20,8 @@ public struct Settings: Codable, Sendable {
         notifications: NotificationSettings = NotificationSettings(),
         remote: RemoteSettings? = nil,
         sessionTimeout: SessionTimeoutSettings = SessionTimeoutSettings(),
-        skill: String = "",
+        promptTemplate: String = "",
+        githubIssuePromptTemplate: String = "#${number}: ${title}\n\n${body}",
         columnOrder: [KanbanColumn] = KanbanColumn.allCases,
         hasCompletedOnboarding: Bool = false
     ) {
@@ -29,9 +31,16 @@ public struct Settings: Codable, Sendable {
         self.notifications = notifications
         self.remote = remote
         self.sessionTimeout = sessionTimeout
-        self.skill = skill
+        self.promptTemplate = promptTemplate
+        self.githubIssuePromptTemplate = githubIssuePromptTemplate
         self.columnOrder = columnOrder
         self.hasCompletedOnboarding = hasCompletedOnboarding
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case projects, globalView, github, notifications, remote, sessionTimeout
+        case promptTemplate, githubIssuePromptTemplate, columnOrder, hasCompletedOnboarding
+        case skill // backward-compat: old name for promptTemplate
     }
 
     // Backward-compatible decoding — new fields default gracefully
@@ -43,9 +52,28 @@ public struct Settings: Codable, Sendable {
         notifications = try container.decodeIfPresent(NotificationSettings.self, forKey: .notifications) ?? NotificationSettings()
         remote = try container.decodeIfPresent(RemoteSettings.self, forKey: .remote)
         sessionTimeout = try container.decodeIfPresent(SessionTimeoutSettings.self, forKey: .sessionTimeout) ?? SessionTimeoutSettings()
-        skill = try container.decodeIfPresent(String.self, forKey: .skill) ?? ""
+        // Backward-compat: try "promptTemplate" first, fall back to "skill"
+        promptTemplate = try container.decodeIfPresent(String.self, forKey: .promptTemplate)
+            ?? container.decodeIfPresent(String.self, forKey: .skill) ?? ""
+        githubIssuePromptTemplate = try container.decodeIfPresent(String.self, forKey: .githubIssuePromptTemplate)
+            ?? "#${number}: ${title}\n\n${body}"
         columnOrder = try container.decodeIfPresent([KanbanColumn].self, forKey: .columnOrder) ?? KanbanColumn.allCases
         hasCompletedOnboarding = try container.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? false
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(projects, forKey: .projects)
+        try container.encode(globalView, forKey: .globalView)
+        try container.encode(github, forKey: .github)
+        try container.encode(notifications, forKey: .notifications)
+        try container.encodeIfPresent(remote, forKey: .remote)
+        try container.encode(sessionTimeout, forKey: .sessionTimeout)
+        try container.encode(promptTemplate, forKey: .promptTemplate)
+        try container.encode(githubIssuePromptTemplate, forKey: .githubIssuePromptTemplate)
+        try container.encode(columnOrder, forKey: .columnOrder)
+        try container.encode(hasCompletedOnboarding, forKey: .hasCompletedOnboarding)
+        // Note: "skill" is NOT encoded — only read for backward-compat
     }
 }
 

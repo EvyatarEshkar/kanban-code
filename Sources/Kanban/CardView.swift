@@ -20,14 +20,14 @@ struct CardView: View {
                 .lineLimit(2)
                 .foregroundStyle(.primary)
 
-            // Project + branch
+            // Project + branch + link icons
             HStack(spacing: 4) {
                 if let projectName = card.projectName {
                     Label(projectName, systemImage: "folder")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                if let branch = card.link.worktreeBranch {
+                if let branch = card.link.worktreeLink?.branch {
                     Label(branch, systemImage: "arrow.triangle.branch")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -35,19 +35,13 @@ struct CardView: View {
             }
             .lineLimit(1)
 
-            // Bottom row: time + status
-            HStack {
+            // Bottom row: badge + time + link indicators + session number
+            HStack(spacing: 6) {
+                CardLabelBadge(label: card.link.cardLabel)
+
                 Text(card.relativeTime)
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
-
-                Spacer()
-
-                if card.link.sessionNumber != nil {
-                    Text("#\(card.link.sessionNumber!)")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
             }
         }
         .padding(10)
@@ -97,7 +91,7 @@ struct CardView: View {
                 Label("Copy Resume Command", systemImage: "doc.on.doc")
             }
             Divider()
-            if let pr = card.link.githubPR {
+            if let pr = card.link.prLink?.number {
                 Button(action: {}) {
                     Label("Open PR #\(pr)", systemImage: "arrow.up.right.square")
                 }
@@ -108,5 +102,30 @@ struct CardView: View {
             }
         }
     }
+}
 
+// MARK: - Card Label Badge
+
+struct CardLabelBadge: View {
+    let label: CardLabel
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        Text(label.rawValue)
+            .font(.system(size: 8, weight: .bold, design: .rounded))
+            .foregroundStyle(colorScheme == .dark ? .black : .white)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(color, in: Capsule())
+    }
+
+    private var color: Color {
+        switch label {
+        case .session: .orange
+        case .worktree: .teal
+        case .issue: .blue
+        case .pr: .purple
+        case .task: .gray
+        }
+    }
 }

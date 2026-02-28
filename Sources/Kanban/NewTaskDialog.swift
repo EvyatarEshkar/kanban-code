@@ -5,10 +5,9 @@ struct NewTaskDialog: View {
     @Binding var isPresented: Bool
     var projects: [Project] = []
     var defaultProjectPath: String?
-    var onCreate: (String, String, String?, Bool) -> Void = { _, _, _, _ in }
+    var onCreate: (String, String?, Bool) -> Void = { _, _, _ in }
 
-    @State private var title = ""
-    @State private var description = ""
+    @State private var prompt = ""
     @State private var selectedProjectPath: String = ""
     @State private var customPath = ""
     @AppStorage("startTaskImmediately") private var startImmediately = true
@@ -21,12 +20,22 @@ struct NewTaskDialog: View {
                 .font(.title3)
                 .fontWeight(.semibold)
 
-            TextField("Task title", text: $title)
-                .textFieldStyle(.roundedBorder)
-
-            TextField("Description (optional)", text: $description, axis: .vertical)
-                .textFieldStyle(.roundedBorder)
-                .lineLimit(3...6)
+            TextEditor(text: $prompt)
+                .font(.body.monospaced())
+                .frame(minHeight: 80, maxHeight: 200)
+                .scrollContentBackground(.hidden)
+                .padding(8)
+                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+                .overlay(alignment: .topLeading) {
+                    if prompt.isEmpty {
+                        Text("Describe what you want Claude to do...")
+                            .font(.body.monospaced())
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 16)
+                            .allowsHitTesting(false)
+                    }
+                }
 
             if projects.isEmpty {
                 TextField("Project path (optional)", text: $customPath)
@@ -60,18 +69,17 @@ struct NewTaskDialog: View {
 
                 Button(startImmediately ? "Create & Start" : "Create") {
                     let proj = resolvedProjectPath
-                    onCreate(title, description, proj, startImmediately)
+                    onCreate(prompt, proj, startImmediately)
                     isPresented = false
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(title.isEmpty)
+                .disabled(prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .buttonStyle(.borderedProminent)
             }
         }
         .padding(20)
-        .frame(width: 400)
+        .frame(width: 450)
         .onAppear {
-            // Default to the currently selected project, or first project
             if let defaultPath = defaultProjectPath,
                projects.contains(where: { $0.path == defaultPath }) {
                 selectedProjectPath = defaultPath

@@ -36,7 +36,7 @@ struct CardDetailView: View {
         self.onRename = onRename
         self.onFork = onFork
         self.onDismiss = onDismiss
-        _selectedTab = State(initialValue: card.link.tmuxSession == nil ? 1 : 0)
+        _selectedTab = State(initialValue: card.link.tmuxLink == nil ? 1 : 0)
         // Tab 0 = Terminal, Tab 1 = History (Actions tab removed — buttons in header now)
     }
 
@@ -72,12 +72,28 @@ struct CardDetailView: View {
                     }
                 }
 
-                HStack(spacing: 8) {
-                    if let branch = card.link.worktreeBranch {
-                        Label(branch, systemImage: "arrow.triangle.branch")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                // Link pills
+                HStack(spacing: 6) {
+                    CardLabelBadge(label: card.link.cardLabel)
+
+                    if let sessionNum = card.link.sessionLink?.sessionNumber {
+                        linkPill(icon: "terminal", text: "#\(sessionNum)", color: .blue)
                     }
+                    if let tmux = card.link.tmuxLink?.sessionName {
+                        linkPill(icon: "terminal.fill", text: tmux, color: .green)
+                    }
+                    if let branch = card.link.worktreeLink?.branch {
+                        linkPill(icon: "arrow.triangle.branch", text: branch, color: .teal)
+                    }
+                    if let pr = card.link.prLink?.number {
+                        linkPill(icon: "arrow.triangle.pull", text: "#\(pr)", color: .purple)
+                    }
+                    if let issue = card.link.issueLink?.number {
+                        linkPill(icon: "exclamationmark.circle", text: "#\(issue)", color: .orange)
+                    }
+
+                    Spacer()
+
                     Text(card.relativeTime)
                         .font(.caption)
                         .foregroundStyle(.tertiary)
@@ -87,7 +103,7 @@ struct CardDetailView: View {
                     copyableRow(icon: "folder", text: projectPath)
                 }
 
-                if let sessionId = card.link.sessionId {
+                if let sessionId = card.link.sessionLink?.sessionId {
                     copyableRow(icon: "number", text: sessionId)
                 }
             }
@@ -173,7 +189,7 @@ struct CardDetailView: View {
 
     @ViewBuilder
     private var terminalView: some View {
-        if let tmuxSession = card.link.tmuxSession {
+        if let tmuxSession = card.link.tmuxLink?.sessionName {
             TerminalRepresentable.tmuxAttach(sessionName: tmuxSession)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
@@ -202,7 +218,7 @@ struct CardDetailView: View {
             Button(action: { showForkConfirm = true }) {
                 Label("Fork Session", systemImage: "arrow.branch")
             }
-            .disabled(card.link.sessionPath == nil)
+            .disabled(card.link.sessionLink?.sessionPath == nil)
 
             Button {
                 checkpointMode = true
@@ -210,7 +226,7 @@ struct CardDetailView: View {
             } label: {
                 Label("Checkpoint / Restore", systemImage: "clock.arrow.circlepath")
             }
-            .disabled(card.link.sessionPath == nil || turns.isEmpty)
+            .disabled(card.link.sessionLink?.sessionPath == nil || turns.isEmpty)
 
             Divider()
 
@@ -218,13 +234,13 @@ struct CardDetailView: View {
                 Label("Copy Resume Command", systemImage: "doc.on.doc")
             }
 
-            if let sessionId = card.link.sessionId {
+            if let sessionId = card.link.sessionLink?.sessionId {
                 Button(action: { copyToClipboard(sessionId) }) {
                     Label("Copy Session ID", systemImage: "number")
                 }
             }
 
-            if let pr = card.link.githubPR {
+            if let pr = card.link.prLink?.number {
                 Divider()
                 Button(action: {}) {
                     Label("Open PR #\(pr)", systemImage: "arrow.up.right.square")
@@ -241,7 +257,7 @@ struct CardDetailView: View {
     // MARK: - History loading
 
     private func loadHistory() async {
-        guard let path = card.link.sessionPath ?? card.session?.jsonlPath else { return }
+        guard let path = card.link.sessionLink?.sessionPath ?? card.session?.jsonlPath else { return }
         if turns.isEmpty { isLoadingHistory = true }
         do {
             turns = try await TranscriptReader.readTurns(from: path)
@@ -255,7 +271,7 @@ struct CardDetailView: View {
 
     private func startHistoryWatcher() {
         stopHistoryWatcher()
-        guard let path = card.link.sessionPath ?? card.session?.jsonlPath else { return }
+        guard let path = card.link.sessionLink?.sessionPath ?? card.session?.jsonlPath else { return }
 
         let fd = open(path, O_EVTONLY)
         guard fd >= 0 else { return }
@@ -291,7 +307,7 @@ struct CardDetailView: View {
     // MARK: - Fork
 
     private func performFork() {
-        guard let path = card.link.sessionPath else { return }
+        guard let path = card.link.sessionLink?.sessionPath else { return }
         Task {
             do {
                 let newId = try await sessionStore.forkSession(sessionPath: path)
@@ -306,7 +322,7 @@ struct CardDetailView: View {
     // MARK: - Checkpoint
 
     private func performCheckpoint() {
-        guard let path = card.link.sessionPath,
+        guard let path = card.link.sessionLink?.sessionPath,
               let turn = checkpointTurn else { return }
         Task {
             do {
@@ -325,12 +341,24 @@ struct CardDetailView: View {
         if let projectPath = card.link.projectPath {
             cmd += "cd \(projectPath) && "
         }
-        if let sessionId = card.link.sessionId {
+        if let sessionId = card.link.sessionLink?.sessionId {
             cmd += "claude --resume \(sessionId)"
         } else {
             cmd += "# no session yet"
         }
         copyToClipboard(cmd)
+    }
+
+    private func linkPill(icon: String, text: String, color: Color) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: icon)
+            Text(text)
+        }
+        .font(.caption2)
+        .foregroundStyle(color)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(color.opacity(0.12), in: Capsule())
     }
 
     private func copyToClipboard(_ text: String) {

@@ -30,10 +30,10 @@ struct CoordinationStoreTests {
         let store = CoordinationStore(basePath: dir)
 
         let link = Link(
-            sessionId: "abc-123",
+            name: "Test session",
             projectPath: "/test/project",
             column: .inProgress,
-            name: "Test session"
+            sessionLink: SessionLink(sessionId: "abc-123")
         )
         try await store.writeLinks([link])
 
@@ -50,7 +50,7 @@ struct CoordinationStoreTests {
         defer { cleanup(dir) }
         let store = CoordinationStore(basePath: dir)
 
-        let link = Link(sessionId: "new-1", column: .backlog)
+        let link = Link(column: .backlog, sessionLink: SessionLink(sessionId: "new-1"))
         try await store.upsertLink(link)
 
         let links = try await store.readLinks()
@@ -64,7 +64,7 @@ struct CoordinationStoreTests {
         defer { cleanup(dir) }
         let store = CoordinationStore(basePath: dir)
 
-        var link = Link(sessionId: "update-1", column: .backlog, name: "Original")
+        var link = Link(name: "Original", column: .backlog, sessionLink: SessionLink(sessionId: "update-1"))
         try await store.upsertLink(link)
 
         link.name = "Updated"
@@ -84,8 +84,8 @@ struct CoordinationStoreTests {
         let store = CoordinationStore(basePath: dir)
 
         try await store.writeLinks([
-            Link(sessionId: "a", column: .backlog),
-            Link(sessionId: "b", column: .inProgress),
+            Link(column: .backlog, sessionLink: SessionLink(sessionId: "a")),
+            Link(column: .inProgress, sessionLink: SessionLink(sessionId: "b")),
         ])
 
         try await store.removeLink(sessionId: "a")
@@ -118,7 +118,7 @@ struct CoordinationStoreTests {
         defer { cleanup(dir) }
         let store = CoordinationStore(basePath: dir)
 
-        try await store.writeLinks([Link(sessionId: "pretty", column: .done, name: "Test")])
+        try await store.writeLinks([Link(name: "Test", column: .done, sessionLink: SessionLink(sessionId: "pretty"))])
 
         let filePath = (dir as NSString).appendingPathComponent("links.json")
         let content = try String(contentsOfFile: filePath, encoding: .utf8)
@@ -132,15 +132,73 @@ struct CoordinationStoreTests {
         defer { cleanup(dir) }
         let store = CoordinationStore(basePath: dir)
 
-        try await store.upsertLink(Link(sessionId: "upd-1", column: .backlog))
+        try await store.upsertLink(Link(column: .backlog, sessionLink: SessionLink(sessionId: "upd-1")))
 
         try await store.updateLink(sessionId: "upd-1") { link in
             link.column = .inProgress
-            link.tmuxSession = "feat-login"
+            link.tmuxLink = TmuxLink(sessionName: "feat-login")
         }
 
         let link = try await store.linkForSession("upd-1")
         #expect(link?.column == .inProgress)
         #expect(link?.tmuxSession == "feat-login")
+    }
+
+    @Test("Backward-compat: old flat JSON format is decoded correctly")
+    func backwardCompatDecoding() async throws {
+        let dir = try makeTempDir()
+        defer { cleanup(dir) }
+
+        // Write old-format JSON directly
+        let filePath = (dir as NSString).appendingPathComponent("links.json")
+        let oldJson = """
+        {
+          "links": [
+            {
+              "id": "old-uuid",
+              "sessionId": "claude-session-1",
+              "sessionPath": "/path/to/session.jsonl",
+              "worktreePath": "/path/to/worktree",
+              "worktreeBranch": "feat/login",
+              "tmuxSession": "feat-login",
+              "githubIssue": 123,
+              "githubPR": 456,
+              "projectPath": "/test/project",
+              "column": "in_progress",
+              "name": "Test session",
+              "createdAt": "2026-02-28T10:00:00Z",
+              "updatedAt": "2026-02-28T10:30:00Z",
+              "manualOverrides": {},
+              "manuallyArchived": false,
+              "source": "discovered",
+              "issueBody": "Fix the bug"
+            }
+          ]
+        }
+        """
+        try oldJson.write(toFile: filePath, atomically: true, encoding: .utf8)
+
+        let store = CoordinationStore(basePath: dir)
+        let links = try await store.readLinks()
+
+        #expect(links.count == 1)
+        let link = links[0]
+        #expect(link.id == "old-uuid")
+        #expect(link.sessionLink?.sessionId == "claude-session-1")
+        #expect(link.sessionLink?.sessionPath == "/path/to/session.jsonl")
+        #expect(link.tmuxLink?.sessionName == "feat-login")
+        #expect(link.worktreeLink?.path == "/path/to/worktree")
+        #expect(link.worktreeLink?.branch == "feat/login")
+        #expect(link.issueLink?.number == 123)
+        #expect(link.issueLink?.body == "Fix the bug")
+        #expect(link.prLink?.number == 456)
+
+        // Backward-compat computed properties still work
+        #expect(link.sessionId == "claude-session-1")
+        #expect(link.tmuxSession == "feat-login")
+        #expect(link.worktreePath == "/path/to/worktree")
+        #expect(link.worktreeBranch == "feat/login")
+        #expect(link.githubIssue == 123)
+        #expect(link.githubPR == 456)
     }
 }

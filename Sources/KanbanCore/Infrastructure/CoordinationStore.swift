@@ -67,7 +67,7 @@ public actor CoordinationStore {
 
     /// Get a single link by session ID.
     public func linkForSession(_ sessionId: String) throws -> Link? {
-        try readLinks().first { $0.sessionId == sessionId }
+        try readLinks().first { $0.sessionLink?.sessionId == sessionId }
     }
 
     /// Upsert a link: update if exists (by link.id), insert if new.
@@ -93,7 +93,7 @@ public actor CoordinationStore {
     /// Update specific fields of a link by session ID.
     public func updateLink(sessionId: String, update: (inout Link) -> Void) throws {
         var links = try readLinks()
-        guard let index = links.firstIndex(where: { $0.sessionId == sessionId }) else { return }
+        guard let index = links.firstIndex(where: { $0.sessionLink?.sessionId == sessionId }) else { return }
         update(&links[index])
         links[index].updatedAt = .now
         try writeLinks(links)
@@ -109,7 +109,7 @@ public actor CoordinationStore {
     /// Remove a link by session ID.
     public func removeLink(sessionId: String) throws {
         var links = try readLinks()
-        links.removeAll { $0.sessionId == sessionId }
+        links.removeAll { $0.sessionLink?.sessionId == sessionId }
         try writeLinks(links)
     }
 
@@ -119,7 +119,7 @@ public actor CoordinationStore {
         var links = try readLinks()
         let before = links.count
         links.removeAll { link in
-            guard let path = link.sessionPath else { return false }
+            guard let path = link.sessionLink?.sessionPath else { return false }
             return !fileManager.fileExists(atPath: path)
         }
         if links.count != before {

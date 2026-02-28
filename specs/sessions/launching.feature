@@ -1,32 +1,93 @@
 Feature: Session Launching
   As a developer using Kanban
-  I want to launch Claude Code sessions from the board
-  So that I can start work with proper worktree and tmux setup
+  I want to launch Claude Code sessions from the board with a confirmation dialog
+  So that I can review and edit prompts before starting work
 
   Background:
     Given the Kanban application is running
     And tmux is installed
 
+  # ── Launch Confirmation Dialog ──
+
+  Scenario: Launch confirmation dialog appears before every launch
+    Given I click "Start" on any backlog card
+    Then a launch confirmation dialog should appear with:
+      | Field            | Type              | Editable |
+      | Project path     | Text              | no       |
+      | Prompt           | TextEditor        | yes      |
+      | Create worktree  | Checkbox          | yes      |
+    And the prompt should be pre-filled from prompt templates
+    And I can edit the prompt before clicking "Launch"
+    And "Cancel" dismisses without launching
+
+  Scenario: Prompt is built from templates before dialog
+    Given the promptTemplate is "/orchestrate ${prompt}"
+    And a manual task has promptBody "Fix the login flow"
+    When I click "Start"
+    Then the dialog should show: "/orchestrate Fix the login flow"
+    And I can modify it before launching
+
+  Scenario: Create worktree checkbox defaults and persists
+    When the launch confirmation dialog first appears
+    Then "Create worktree" should be checked by default
+    When I uncheck "Create worktree" and launch
+    Then the next time I open the dialog, it should be unchecked
+    Because the preference is saved via @AppStorage("createWorktree")
+
+  Scenario: Launching without worktree
+    Given "Create worktree" is unchecked in the dialog
+    When I click "Launch"
+    Then Claude should be started without the --worktree flag
+    And no worktreeLink should be set on the card
+
+  Scenario: Launching with worktree
+    Given "Create worktree" is checked in the dialog
+    When I click "Launch"
+    Then Claude should be started with `claude --worktree <name>`
+    And the worktree name should be derived from the card:
+      | Card type      | Worktree name        |
+      | GitHub issue   | issue-123            |
+      | Manual task    | (auto-generated)     |
+
   # ── Launching from Backlog ──
 
-  Scenario: Launch Claude with worktree for a GitHub issue
+  Scenario: Launch Claude for a GitHub issue
     Given a GitHub issue "#123: Fix login bug" is in Backlog
     And the project is configured at "~/Projects/remote/langwatch-saas"
-    When I click "Start"
+    When I click "Start" and confirm the launch dialog
     Then the following should happen in order:
       | Step | Action                                                        |
       | 1    | Create tmux session named "issue-123"                         |
       | 2    | Inside tmux: cd to project directory                          |
       | 3    | Run: claude --worktree issue-123                              |
-      | 4    | Send prompt with skill prefix + issue description             |
-    And the coordination file should record the link
+      | 4    | Send the prompt from the dialog                              |
+    And the existing card should gain a tmuxLink
+    And no new card should be created
+
+  Scenario: Launch Claude for a manual task
+    Given a manual task is in Backlog
+    When I click "Start" and confirm the launch dialog
+    Then Claude should be launched with the edited prompt
+    And the existing card should gain a tmuxLink
+
+  Scenario: Launch Claude on an orphan worktree
+    Given an orphan worktree card exists (has worktreeLink, no sessionLink)
+    When I click "Start Work"
+    Then the launch confirmation dialog should appear
+    And the prompt field should be empty (user must provide a prompt)
+    And "Create worktree" should be hidden (worktree already exists)
+    When I enter a prompt and click "Launch"
+    Then Claude should be launched in the existing worktree directory
+    And no --worktree flag should be passed
 
   Scenario: Launch Claude with auto-generated worktree name
     Given a manual task without a specific branch name
-    When I click "Start"
+    When "Create worktree" is checked in the launch dialog
     Then Claude should be launched with `claude --worktree`
     And Claude Code will auto-generate the worktree name
-    And the background process should later detect the worktree and link it
+    And the reconciler should later detect the worktree and add worktreeLink
+
+  # ── Sub-repo Support ──
 
   Scenario: Launch Claude in a sub-repo
     Given a project is configured with:
@@ -35,13 +96,6 @@ Feature: Session Launching
     When I start a task
     Then Claude should be launched in the projectPath
     But worktrees and PRs should be tracked against the repoRoot
-    And the worktree should be created in the repoRoot
-
-  Scenario: Sub-repo worktree creation
-    Given a project with repoRoot different from projectPath
-    When a worktree needs to be created
-    Then `git -C <repoRoot> worktree add` should be used
-    And the tmux session should cd to the worktree path
 
   # ── Launching without tmux ──
 
@@ -53,7 +107,7 @@ Feature: Session Launching
     And the card should show "no tmux" indicator
     And I should see a hint to install tmux for better experience
 
-  # ── Launching with remote execution ──
+  # ── Remote Execution ──
 
   Scenario: Remote execution configured
     Given remote execution is configured with:
@@ -71,20 +125,7 @@ Feature: Session Launching
   Scenario: Backlog cards show a Start button
     Given a card is in the Backlog column
     Then a play button should be visible on the card
-    And clicking it should launch Claude for that task
-
-  Scenario: Start button on GitHub issue cards
-    Given a GitHub issue card "#123: Fix login bug" is in Backlog
-    When I click the Start button on the card
-    Then Claude should be launched with worktree "issue-123"
-    And the prompt should include the issue title and body
-    And the card should move to In Progress
-
-  Scenario: Start button on manual task cards
-    Given a manual task card is in Backlog
-    When I click the Start button
-    Then Claude should be launched with `claude --worktree` (auto name)
-    And the task title and description should be sent as the prompt
+    And clicking it should open the launch confirmation dialog
 
   Scenario: Context menu Start option
     Given any card in the Backlog column
@@ -94,28 +135,26 @@ Feature: Session Launching
   # ── Resuming ──
 
   Scenario: Resume an existing session from any column
-    Given a session "abc-123" exists in "Requires Attention"
-    When I open the terminal and send a message
-    Then if there's a tmux session, it should be attached
+    Given a card has sessionLink.sessionId = "abc-123"
+    When I click "Resume"
+    Then if there's an existing tmux session, it should be used
+    Otherwise a new tmux session should be created
     And Claude should be resumed with `claude --resume abc-123`
-    And it should use `$SHELL -ic` to inherit aliases
+    And the card should gain/update its tmuxLink
 
   Scenario: Resume without tmux session
-    Given a session "abc-123" exists but has no tmux session
+    Given a card has sessionLink but no tmuxLink
     When I click "Resume"
     Then a new tmux session should be created
-    And `claude --resume abc-123` should be run inside it
-    And the coordination file should record the new tmux link
-
-  Scenario: Resume from card detail Actions tab
-    Given a session card is selected in the inspector
-    When I click "Resume Session" in the Actions tab
-    Then a tmux session should be created/attached
-    And the terminal tab should show the live session
-    And the card should move to In Progress
+    And `claude --resume <sessionId>` should be run inside it
+    And the card should gain a tmuxLink
 
   Scenario: Copy resume command
-    Given a session "abc-123" exists
+    Given a card has sessionLink.sessionId = "abc-123"
     When I click "Copy resume command"
-    Then `claude --resume abc-123` should be copied to clipboard
-    And a toast should show "Copied to clipboard"
+    Then `cd <projectPath> && claude --resume abc-123` should be copied to clipboard
+
+  Scenario: Copy resume command for card without session
+    Given a card has no sessionLink (e.g., backlog issue)
+    When I click "Copy resume command"
+    Then "# no session yet" should be copied to clipboard

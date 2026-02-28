@@ -181,7 +181,7 @@ struct SearchOverlay: View {
         let terms = queryTerms
         guard !terms.isEmpty else { return [] }
         return cards.filter { card in
-            let text = "\(card.displayTitle) \(card.projectName ?? "") \(card.link.worktreeBranch ?? "")".lowercased()
+            let text = "\(card.displayTitle) \(card.projectName ?? "") \(card.link.worktreeLink?.branch ?? "")".lowercased()
             return terms.allSatisfy { text.contains($0) }
         }
     }
@@ -195,13 +195,13 @@ struct SearchOverlay: View {
         isDeepSearching = true
         defer { isDeepSearching = false }
 
-        let paths = cards.compactMap { $0.link.sessionPath ?? $0.session?.jsonlPath }
+        let paths = cards.compactMap { $0.link.sessionLink?.sessionPath ?? $0.session?.jsonlPath }
         let store = ClaudeCodeSessionStore()
 
         do {
             let results = try await store.searchSessions(query: query, paths: paths)
             searchResults = results.map { result in
-                let card = cards.first { ($0.link.sessionPath ?? $0.session?.jsonlPath) == result.sessionPath }
+                let card = cards.first { ($0.link.sessionLink?.sessionPath ?? $0.session?.jsonlPath) == result.sessionPath }
                 return SearchResultItem(
                     id: result.sessionPath,
                     card: card,

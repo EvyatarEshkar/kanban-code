@@ -2,6 +2,21 @@
 
 BDD specifications for a native macOS liquid glass Kanban board to control Claude Code.
 
+## Core Concept: Card-Centric Architecture
+
+A **card** is the first-class entity on the board. Each card has **independently optional typed links**:
+
+| Link Type    | What it adds                          | Label if primary |
+|-------------|---------------------------------------|-----------------|
+| SessionLink  | History tab, resume, fork, checkpoint | SESSION (blue)   |
+| TmuxLink     | Terminal tab, live view               | —                |
+| WorktreeLink | Branch info, cleanup action           | WORKTREE (green) |
+| PRLink       | PR status, merge detection            | PR (purple)      |
+| IssueLink    | Issue body, "Open in Browser"         | ISSUE (orange)   |
+
+Cards use **KSUID** IDs (`card_<27-char-base62>`) that are sortable by creation time.
+The **reconciler** matches discovered resources (sessions, worktrees, PRs) to existing cards — preventing duplicates.
+
 ## Spec Structure
 
 ```

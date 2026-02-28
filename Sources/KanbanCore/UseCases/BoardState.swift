@@ -23,7 +23,7 @@ public struct KanbanCard: Identifiable, Sendable {
     public var displayTitle: String {
         if let name = link.name, !name.isEmpty { return name }
         if let session { return session.displayTitle }
-        if let sid = link.sessionId { return String(sid.prefix(8)) + "..." }
+        if let sid = link.sessionLink?.sessionId { return String(sid.prefix(8)) + "..." }
         return String(link.id.prefix(8)) + "..."
     }
 
@@ -173,7 +173,7 @@ public final class BoardState: @unchecked Sendable {
             // Persist to our coordination store
             try? await coordinationStore.upsertLink(link)
             // Also update Claude's sessions-index.json so other tools see the rename
-            if let sessionId = link.sessionId {
+            if let sessionId = link.sessionLink?.sessionId {
                 try? SessionIndexReader.updateSummary(sessionId: sessionId, summary: name)
             }
         }
@@ -232,52 +232,19 @@ public final class BoardState: @unchecked Sendable {
             }
 
             let sessions = try await discovery.discoverSessions()
-            var links = try await coordinationStore.readLinks()
+            let existingLinks = try await coordinationStore.readLinks()
             let sessionsById = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
 
-            // Index links by link.id (primary key) and build reverse sessionId → linkId map
-            var linksById = Dictionary(links.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-            var linkIdBySessionId: [String: String] = [:]
-            for link in links {
-                if let sid = link.sessionId {
-                    linkIdBySessionId[sid] = link.id
-                }
-            }
-
-            for session in sessions {
-                if let linkId = linkIdBySessionId[session.id], var link = linksById[linkId] {
-                    // Update existing link with latest session data (non-override fields)
-                    link.sessionPath = session.jsonlPath
-                    link.lastActivity = session.modifiedTime
-                    if !link.manualOverrides.column {
-                        let activity = await activityDetector?.activityState(for: session.id)
-                        link.column = AssignColumn.assign(link: link, activityState: activity)
-                    }
-                    linksById[linkId] = link
-                } else {
-                    // New session not referenced by any link — create discovered link
-                    let newLink = Link(
-                        sessionId: session.id,
-                        sessionPath: session.jsonlPath,
-                        projectPath: session.projectPath,
-                        column: .allSessions,
-                        lastActivity: session.modifiedTime,
-                        source: .discovered
-                    )
-                    linksById[newLink.id] = newLink
-                    linkIdBySessionId[session.id] = newLink.id
-                }
-            }
-
-            // Build cards with activity states
-            let mergedLinks = Array(linksById.values)
+            // Reconcile: match sessions/worktrees/PRs to existing cards
+            let snapshot = CardReconciler.DiscoverySnapshot(sessions: sessions)
+            let mergedLinks = CardReconciler.reconcile(existing: existingLinks, snapshot: snapshot)
             var newCards: [KanbanCard] = []
             for link in mergedLinks {
-                let sessionId = link.sessionId ?? link.id
+                let sessionId = link.sessionLink?.sessionId ?? link.id
                 let activity = await activityDetector?.activityState(for: sessionId)
                 newCards.append(KanbanCard(
                     link: link,
-                    session: link.sessionId.flatMap { sessionsById[$0] },
+                    session: link.sessionLink.flatMap { sessionsById[$0.sessionId] },
                     activityState: activity
                 ))
             }
@@ -363,16 +330,15 @@ public final class BoardState: @unchecked Sendable {
 
                     // Check if link already exists
                     let existing = links.first(where: {
-                        $0.githubIssue == issue.number && $0.projectPath == project.path
+                        $0.issueLink?.number == issue.number && $0.projectPath == project.path
                     })
                     if existing == nil {
                         let link = Link(
-                            githubIssue: issue.number,
+                            name: "#\(issue.number): \(issue.title)",
                             projectPath: project.path,
                             column: .backlog,
-                            name: "#\(issue.number): \(issue.title)",
                             source: .githubIssue,
-                            issueBody: issue.body
+                            issueLink: IssueLink(number: issue.number, body: issue.body)
                         )
                         links.append(link)
                         changed = true
@@ -388,7 +354,7 @@ public final class BoardState: @unchecked Sendable {
         links.removeAll { link in
             guard link.source == .githubIssue,
                   link.column == .backlog,
-                  let issueNum = link.githubIssue,
+                  let issueNum = link.issueLink?.number,
                   let projPath = link.projectPath else { return false }
             let key = "\(projPath):\(issueNum)"
             return !fetchedIssueKeys.contains(key)
@@ -403,14 +369,14 @@ public final class BoardState: @unchecked Sendable {
             var newCards: [KanbanCard] = []
             for link in links {
                 let activity: ActivityState?
-                if let sessionId = link.sessionId {
+                if let sessionId = link.sessionLink?.sessionId {
                     activity = await activityDetector?.activityState(for: sessionId)
                 } else {
                     activity = nil
                 }
                 newCards.append(KanbanCard(
                     link: link,
-                    session: link.sessionId.flatMap { sessionsById[$0] },
+                    session: link.sessionLink.flatMap { sessionsById[$0.sessionId] },
                     activityState: activity
                 ))
             }

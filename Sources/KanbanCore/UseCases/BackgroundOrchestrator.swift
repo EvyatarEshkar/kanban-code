@@ -117,7 +117,7 @@ public final class BackgroundOrchestrator: @unchecked Sendable {
         var message = "Waiting for input"
         var imageData: Data?
 
-        if let transcriptPath = link?.sessionPath {
+        if let transcriptPath = link?.sessionLink?.sessionPath {
             if let lastText = await TranscriptNotificationReader.lastAssistantText(transcriptPath: transcriptPath) {
                 let lineCount = lastText.components(separatedBy: "\n").count
                 if lineCount > 1 {
@@ -143,8 +143,8 @@ public final class BackgroundOrchestrator: @unchecked Sendable {
             let links = try await coordinationStore.readLinks()
             let sessionPaths = Dictionary(
                 links.compactMap { link -> (String, String)? in
-                    guard let sessionId = link.sessionId,
-                          let path = link.sessionPath else { return nil }
+                    guard let sessionId = link.sessionLink?.sessionId,
+                          let path = link.sessionLink?.sessionPath else { return nil }
                     return (sessionId, path)
                 },
                 uniquingKeysWith: { a, _ in a }
@@ -179,11 +179,11 @@ public final class BackgroundOrchestrator: @unchecked Sendable {
             let tmuxNames = Set(tmuxSessions.map(\.name))
 
             for i in links.indices {
-                guard let sessionId = links[i].sessionId else { continue }
+                guard let sessionId = links[i].sessionLink?.sessionId else { continue }
                 let activityState = await activityDetector.activityState(for: sessionId)
-                let pr = links[i].worktreeBranch.flatMap { allPRs[$0] }
-                let hasWorktree = links[i].worktreeBranch != nil
-                let hasTmux = links[i].tmuxSession.map { tmuxNames.contains($0) } ?? false
+                let pr = links[i].worktreeLink?.branch.flatMap { allPRs[$0] }
+                let hasWorktree = links[i].worktreeLink?.branch != nil
+                let hasTmux = links[i].tmuxLink.map { tmuxNames.contains($0.sessionName) } ?? false
 
                 // Clear manual column override when we have definitive activity data
                 // (hooks fired, or tmux session gone). Manual override is only for user drags.
@@ -191,9 +191,9 @@ public final class BackgroundOrchestrator: @unchecked Sendable {
                     if activityState != .stale {
                         // Hooks provided real data — let auto-assignment take over
                         links[i].manualOverrides.column = false
-                    } else if links[i].tmuxSession != nil && !hasTmux {
+                    } else if links[i].tmuxLink != nil && !hasTmux {
                         // Had a tmux session but it's gone now
-                        links[i].tmuxSession = nil
+                        links[i].tmuxLink = nil
                         links[i].manualOverrides.column = false
                     }
                 }
