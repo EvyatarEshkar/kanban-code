@@ -107,7 +107,8 @@ public final class BoardState: @unchecked Sendable {
         link.manualOverrides.name = true
         link.updatedAt = .now
         let session = cards[index].session
-        cards[index] = KanbanCard(link: link, session: session)
+        let activity = cards[index].activityState
+        cards[index] = KanbanCard(link: link, session: session, activityState: activity)
 
         let sessionId = link.sessionId
         Task {
@@ -126,7 +127,8 @@ public final class BoardState: @unchecked Sendable {
         link.column = .allSessions
         link.updatedAt = .now
         let session = cards[index].session
-        cards[index] = KanbanCard(link: link, session: session)
+        let activity = cards[index].activityState
+        cards[index] = KanbanCard(link: link, session: session, activityState: activity)
 
         Task {
             try? await coordinationStore.upsertLink(link)
@@ -141,7 +143,8 @@ public final class BoardState: @unchecked Sendable {
         link.manualOverrides.column = true
         link.updatedAt = .now
         let session = cards[index].session
-        cards[index] = KanbanCard(link: link, session: session)
+        let activity = cards[index].activityState
+        cards[index] = KanbanCard(link: link, session: session, activityState: activity)
 
         // Persist — use upsertLink so discovered-only links get written too
         Task {

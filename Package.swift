@@ -1,13 +1,14 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.2
 import PackageDescription
 
 let package = Package(
     name: "Kanban",
     platforms: [
-        .macOS(.v14),
+        .macOS(.v26),
     ],
     products: [
         .executable(name: "Kanban", targets: ["Kanban"]),
+        .executable(name: "clawd", targets: ["Clawd"]),
         .library(name: "KanbanCore", targets: ["KanbanCore"]),
     ],
     dependencies: [
@@ -19,6 +20,10 @@ let package = Package(
             dependencies: ["KanbanCore", "SwiftTerm"],
             path: "Sources/Kanban",
             resources: [.copy("Resources")]
+        ),
+        .executableTarget(
+            name: "Clawd",
+            path: "Sources/Clawd"
         ),
         .target(
             name: "KanbanCore",

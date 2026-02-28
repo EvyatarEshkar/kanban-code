@@ -23,7 +23,7 @@ struct SettingsView: View {
             RemoteSettingsView()
                 .tabItem { Label("Remote", systemImage: "network") }
         }
-        .frame(width: 450, height: 350)
+        .frame(width: 450, height: 480)
         .task {
             await checkAvailability()
         }
@@ -73,6 +73,25 @@ struct GeneralSettingsView: View {
                 statusRow("Mutagen", available: mutagenAvailable)
             }
 
+            Section("Amphetamine (Sleep Prevention)") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Kanban spawns a **clawd** helper process when Claude sessions are actively working. Configure Amphetamine to detect it:")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        instructionRow(1, "Install **Amphetamine** from the Mac App Store")
+                        instructionRow(2, "Open Amphetamine → Preferences → **Triggers**")
+                        instructionRow(3, "Add new trigger → select **Application**")
+                        instructionRow(4, "Search for **\"clawd\"** and select it")
+                    }
+
+                    Text("Amphetamine will keep your Mac awake whenever Claude is working, and allow sleep when all sessions finish.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
             Section("Settings File") {
                 HStack {
                     Text("~/.kanban/settings.json")
@@ -89,6 +108,19 @@ struct GeneralSettingsView: View {
         }
         .formStyle(.grouped)
         .padding()
+    }
+
+    private func instructionRow(_ number: Int, _ text: LocalizedStringKey) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Text("\(number).")
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(.secondary)
+                .frame(width: 14, alignment: .trailing)
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 
     private func statusRow(_ name: String, available: Bool) -> some View {

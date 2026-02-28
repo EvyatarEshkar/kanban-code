@@ -4,12 +4,13 @@ import KanbanCore
 
 /// Manages the menu bar status item (system tray).
 /// Shows clawd icon when Claude sessions are actively working.
-/// Amphetamine can be configured to detect this process to prevent sleep.
+/// Spawns a separate "clawd" helper process so Amphetamine can detect it.
 @MainActor
 final class SystemTray: @unchecked Sendable {
     private var statusItem: NSStatusItem?
     private var menu: NSMenu?
     private weak var boardState: BoardState?
+    private var clawdProcess: Process?
 
     func setup(boardState: BoardState) {
         self.boardState = boardState
@@ -99,9 +100,65 @@ final class SystemTray: @unchecked Sendable {
     }
 
     /// Show tray icon only when there are In Progress sessions.
+    /// Also manages the "clawd" helper process for Amphetamine integration.
     private func updateVisibility() {
         guard let state = boardState else { return }
         let hasActive = state.cardCount(in: .inProgress) > 0
         statusItem?.isVisible = hasActive
+
+        if hasActive {
+            startClawdIfNeeded()
+        } else {
+            stopClawd()
+        }
+    }
+
+    // MARK: - Clawd helper process (for Amphetamine)
+
+    /// Spawns the "clawd" helper so Amphetamine can detect it.
+    private func startClawdIfNeeded() {
+        // Already running?
+        if let proc = clawdProcess, proc.isRunning { return }
+
+        // Find clawd binary next to the Kanban binary
+        let clawdPath = Self.findClawdBinary()
+        guard let path = clawdPath else { return }
+
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: path)
+        proc.qualityOfService = .background
+        do {
+            try proc.run()
+            clawdProcess = proc
+        } catch {
+            // Best-effort — Amphetamine integration is optional
+        }
+    }
+
+    /// Kill the clawd helper when no more active sessions.
+    private func stopClawd() {
+        guard let proc = clawdProcess, proc.isRunning else {
+            clawdProcess = nil
+            return
+        }
+        proc.terminate()
+        clawdProcess = nil
+    }
+
+    /// Find the clawd binary relative to the running Kanban binary.
+    private static func findClawdBinary() -> String? {
+        // In a Swift Package build, both binaries are in the same .build/debug/ directory
+        let kanbanPath = ProcessInfo.processInfo.arguments[0]
+        let dir = (kanbanPath as NSString).deletingLastPathComponent
+        let clawdPath = (dir as NSString).appendingPathComponent("clawd")
+        if FileManager.default.isExecutableFile(atPath: clawdPath) {
+            return clawdPath
+        }
+        // Also check ~/.kanban/bin/clawd for installed locations
+        let installedPath = (NSHomeDirectory() as NSString).appendingPathComponent(".kanban/bin/clawd")
+        if FileManager.default.isExecutableFile(atPath: installedPath) {
+            return installedPath
+        }
+        return nil
     }
 }
