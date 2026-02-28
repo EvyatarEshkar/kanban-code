@@ -9,6 +9,7 @@ struct ContentView: View {
     @State private var hooksInstalled = true // assume true until checked
     @State private var hookSetupError: String?
     private let coordinationStore: CoordinationStore
+    private let systemTray = SystemTray()
 
     private var showInspector: Binding<Bool> {
         Binding(
@@ -88,7 +89,9 @@ struct ContentView: View {
             }
             .task {
                 hooksInstalled = HookManager.isInstalled()
+                systemTray.setup(boardState: boardState)
                 await boardState.refresh()
+                systemTray.update()
                 orchestrator.start()
             }
             .task(id: "refresh-timer") {
@@ -96,6 +99,7 @@ struct ContentView: View {
                     try? await Task.sleep(for: .seconds(30))
                     guard !Task.isCancelled else { break }
                     await boardState.refresh()
+                    systemTray.update()
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .kanbanToggleSearch)) { _ in

@@ -36,12 +36,6 @@ struct DroppableColumnView: View {
                     .font(.headline)
                     .foregroundStyle(.primary)
 
-                if column == .inProgress && !cards.isEmpty {
-                    ProgressView()
-                        .controlSize(.small)
-                        .scaleEffect(0.7)
-                }
-
                 Spacer()
 
                 Text("\(cards.count)")

@@ -5,11 +5,18 @@ public struct KanbanCard: Identifiable, Sendable {
     public let id: String // sessionId — stable across refreshes
     public let link: Link
     public let session: Session?
+    public let activityState: ActivityState?
 
-    public init(link: Link, session: Session? = nil) {
+    public init(link: Link, session: Session? = nil, activityState: ActivityState? = nil) {
         self.id = link.sessionId
         self.link = link
         self.session = session
+        self.activityState = activityState
+    }
+
+    /// Whether Claude is confirmed actively working right now (not just waiting).
+    public var isActivelyWorking: Bool {
+        activityState == .activelyWorking
     }
 
     /// Best display title: link name → session display title → session ID prefix.
@@ -180,10 +187,16 @@ public final class BoardState: @unchecked Sendable {
                 }
             }
 
-            // Build cards
+            // Build cards with activity states
             let mergedLinks = Array(linksById.values)
-            let newCards = mergedLinks.map { link in
-                KanbanCard(link: link, session: sessionsById[link.sessionId])
+            var newCards: [KanbanCard] = []
+            for link in mergedLinks {
+                let activity = await activityDetector?.activityState(for: link.sessionId)
+                newCards.append(KanbanCard(
+                    link: link,
+                    session: sessionsById[link.sessionId],
+                    activityState: activity
+                ))
             }
 
             cards = newCards

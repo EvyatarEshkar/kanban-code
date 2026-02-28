@@ -90,9 +90,15 @@ struct CardView: View {
     private var statusIcon: some View {
         switch card.link.column {
         case .inProgress:
-            Image(systemName: "play.circle.fill")
-                .foregroundStyle(.green)
-                .font(.caption)
+            if card.isActivelyWorking {
+                ProgressView()
+                    .controlSize(.mini)
+                    .scaleEffect(0.8)
+            } else {
+                Image(systemName: "play.circle.fill")
+                    .foregroundStyle(.green)
+                    .font(.caption)
+            }
         case .requiresAttention:
             Image(systemName: "exclamationmark.circle.fill")
                 .foregroundStyle(.orange)

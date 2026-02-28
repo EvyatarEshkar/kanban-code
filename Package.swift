@@ -17,7 +17,8 @@ let package = Package(
         .executableTarget(
             name: "Kanban",
             dependencies: ["KanbanCore", "SwiftTerm"],
-            path: "Sources/Kanban"
+            path: "Sources/Kanban",
+            resources: [.copy("Resources")]
         ),
         .target(
             name: "KanbanCore",
