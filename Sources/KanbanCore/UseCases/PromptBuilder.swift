@@ -35,12 +35,11 @@ public enum PromptBuilder {
         // Wrap with prompt template (prefix/suffix)
         let template = project?.promptTemplate ?? settings?.promptTemplate ?? ""
         if !template.isEmpty {
-            prompt = applyTemplate(template, variables: [
-                "prompt": prompt,
-            ])
-            // If template doesn't contain ${prompt}, prepend it
-            if !template.contains("${prompt}") {
-                prompt = template + " " + prompt
+            if template.contains("${prompt}") {
+                prompt = applyTemplate(template, variables: ["prompt": prompt])
+            } else {
+                // Template has no placeholder — prepend it
+                prompt = template + "\n" + prompt
             }
         }
 

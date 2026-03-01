@@ -273,7 +273,7 @@ struct ContentView: View {
             .task(id: "refresh-timer") {
                 // Fallback periodic refresh for non-hook changes (new sessions, file mtime)
                 while !Task.isCancelled {
-                    try? await Task.sleep(for: .seconds(15))
+                    try? await Task.sleep(for: .seconds(5))
                     guard !Task.isCancelled else { break }
                     await boardState.refresh()
                     systemTray.update()
@@ -935,6 +935,15 @@ struct ContentView: View {
                     isRemote = false
                 }
 
+                // Snapshot existing .jsonl files before launch for session detection
+                let claudeProjectsDir = (NSHomeDirectory() as NSString).appendingPathComponent(".claude/projects")
+                let encodedProject = projectPath.replacingOccurrences(of: "/", with: "-")
+                let sessionDir = (claudeProjectsDir as NSString).appendingPathComponent(encodedProject)
+                let existingFiles = Set(
+                    ((try? FileManager.default.contentsOfDirectory(atPath: sessionDir)) ?? [])
+                        .filter { $0.hasSuffix(".jsonl") }
+                )
+
                 let tmuxName = try await launcher.launch(
                     projectPath: projectPath,
                     prompt: prompt,
@@ -950,6 +959,24 @@ struct ContentView: View {
                     link.column = .inProgress
                     link.isRemote = remoteFlag
                 }
+
+                // Detect new Claude session by polling for new .jsonl file (up to 3 seconds)
+                for _ in 0..<6 {
+                    try? await Task.sleep(for: .milliseconds(500))
+                    let currentFiles = Set(
+                        ((try? FileManager.default.contentsOfDirectory(atPath: sessionDir)) ?? [])
+                            .filter { $0.hasSuffix(".jsonl") }
+                    )
+                    if let newFile = currentFiles.subtracting(existingFiles).first {
+                        let sessionId = (newFile as NSString).deletingPathExtension
+                        let sessionPath = (sessionDir as NSString).appendingPathComponent(newFile)
+                        try? await coordinationStore.updateLink(id: cardId) { @Sendable link in
+                            link.sessionLink = SessionLink(sessionId: sessionId, sessionPath: sessionPath)
+                        }
+                        break
+                    }
+                }
+
                 boardState.setCardColumn(cardId: cardId, to: .inProgress)
                 await boardState.refresh()
             } catch {

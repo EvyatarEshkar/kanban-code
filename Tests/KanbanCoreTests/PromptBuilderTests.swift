@@ -82,6 +82,18 @@ struct PromptBuilderTests {
         #expect(prompt.isEmpty)
     }
 
+    @Test("Prompt template without placeholder prepends to prompt")
+    func promptTemplateWithoutPlaceholder() {
+        let link = Link(
+            name: "Fix bug",
+            source: .manual,
+            promptBody: "Fix the auth bug"
+        )
+        let settings = Settings(promptTemplate: "You are a senior engineer.")
+        let prompt = PromptBuilder.buildPrompt(card: link, settings: settings)
+        #expect(prompt == "You are a senior engineer.\nFix the auth bug")
+    }
+
     @Test("applyTemplate replaces variables")
     func templateVariables() {
         let result = PromptBuilder.applyTemplate(
