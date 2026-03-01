@@ -59,6 +59,11 @@ struct CardDetailView: View {
     @State private var selectedTerminalSession: String?
     @State private var knownTerminalCount: Int = 0
 
+    /// Launch lock older than 30s is stale — stop showing spinner, show terminal instead
+    private var isLaunchStale: Bool {
+        Date.now.timeIntervalSince(card.link.updatedAt) > 30
+    }
+
     let sessionStore: SessionStore
 
     init(card: KanbanCard, sessionStore: SessionStore = ClaudeCodeSessionStore(), onResume: @escaping () -> Void = {}, onRename: @escaping (String) -> Void = { _ in }, onFork: @escaping () -> Void = {}, onDismiss: @escaping () -> Void = {}, onUnlink: @escaping (Action.LinkType) -> Void = { _ in }, onAddBranch: @escaping (String) -> Void = { _ in }, onAddIssue: @escaping (Int) -> Void = { _ in }, onCleanupWorktree: @escaping () -> Void = {}, onDeleteCard: @escaping () -> Void = {}, onCreateTerminal: @escaping () -> Void = {}, onKillTerminal: @escaping (String) -> Void = { _ in }, onDiscover: @escaping () -> Void = {}) {
@@ -334,7 +339,16 @@ struct CardDetailView: View {
 
     @ViewBuilder
     private var terminalView: some View {
-        if let tmux = card.link.tmuxLink {
+        if card.link.isLaunching == true, !isLaunchStale {
+            VStack(spacing: 12) {
+                ProgressView()
+                    .controlSize(.large)
+                Text("Starting session…")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if let tmux = card.link.tmuxLink {
             let allSessions = tmux.allSessionNames
             let currentSession = selectedTerminalSession ?? tmux.sessionName
 
@@ -415,14 +429,12 @@ struct CardDetailView: View {
                         HStack(spacing: 3) {
                             Image(systemName: "doc.on.doc")
                                 .font(.caption2)
-                            Text("tmux attach")
+                            Text("Copy tmux attach")
                                 .font(.caption)
                         }
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 4)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                     .help("Copy: tmux attach -t \(currentSession)")
                 }
                 .padding(.horizontal, 8)
@@ -621,7 +633,7 @@ struct CardDetailView: View {
                     }
                     .padding(.vertical, 8)
                 } else if let body = prBody ?? card.link.prLink?.body, !body.isEmpty {
-                    Markdown(body)
+                    Markdown(htmlToMarkdownImages(body))
                         .markdownTheme(.compact)
                         .textSelection(.enabled)
                 } else {
@@ -696,6 +708,38 @@ struct CardDetailView: View {
     private func resolvedPRURL(_ pr: PRLink) -> URL? {
         let urlString = pr.url ?? githubBaseURL.map { GitRemoteResolver.prURL(base: $0, number: pr.number) }
         return urlString.flatMap { URL(string: $0) }
+    }
+
+    /// Convert HTML img tags to Markdown image syntax so MarkdownUI can render them.
+    private func htmlToMarkdownImages(_ text: String) -> String {
+        // Match <img ... src="url" ... /> or <img ... src="url" ...>
+        guard let regex = try? NSRegularExpression(
+            pattern: #"<img\s+[^>]*?src\s*=\s*"([^"]+)"[^>]*?/?>"#,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        ) else { return text }
+
+        var result = text
+        let matches = regex.matches(in: result, range: NSRange(result.startIndex..., in: result))
+
+        // Replace in reverse order to preserve ranges
+        for match in matches.reversed() {
+            guard let fullRange = Range(match.range, in: result),
+                  let srcRange = Range(match.range(at: 1), in: result) else { continue }
+            let src = String(result[srcRange])
+
+            // Try to extract alt text
+            var alt = "image"
+            if let altRegex = try? NSRegularExpression(pattern: #"alt\s*=\s*"([^"]*)""#, options: .caseInsensitive),
+               let altMatch = altRegex.firstMatch(in: String(result[fullRange]), range: NSRange(0..<result[fullRange].count)),
+               let altRange = Range(altMatch.range(at: 1), in: String(result[fullRange])) {
+                let extracted = String(String(result[fullRange])[altRange])
+                if !extracted.isEmpty { alt = extracted }
+            }
+
+            result.replaceSubrange(fullRange, with: "![\(alt)](\(src))")
+        }
+
+        return result
     }
 
     private func loadPRBody() async {

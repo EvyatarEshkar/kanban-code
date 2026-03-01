@@ -227,7 +227,10 @@ public enum Reducer {
 
         case .launchCard(let cardId, _, let projectPath, let worktreeName, _, _):
             guard var link = state.links[cardId] else { return [] }
-            let tmuxName = LaunchSession.tmuxSessionName(project: projectPath, worktree: worktreeName)
+            let projectName = (projectPath as NSString).lastPathComponent
+            let tmuxName = worktreeName != nil
+                ? "\(projectName)-\(worktreeName!)"
+                : "\(projectName)-\(cardId)"
             link.tmuxLink = TmuxLink(sessionName: tmuxName)
             link.column = .inProgress
             link.isLaunching = true
@@ -419,11 +422,17 @@ public enum Reducer {
             )
             state.activityMap = result.activityMap
 
-            // Merge reconciled links, but SKIP cards mid-launch
+            // Merge reconciled links, but SKIP cards mid-launch (with 30s timeout)
             var mergedLinks = state.links
             for link in result.links {
-                if mergedLinks[link.id]?.isLaunching == true {
-                    // Preserve in-progress launch state — don't let reconciliation override it
+                if let existing = mergedLinks[link.id], existing.isLaunching == true {
+                    // Clear stale launch locks (app restart, crash, etc.)
+                    if Date.now.timeIntervalSince(existing.updatedAt) > 30 {
+                        var cleared = link
+                        cleared.isLaunching = nil
+                        mergedLinks[link.id] = cleared
+                    }
+                    // Otherwise preserve in-progress launch state
                     continue
                 }
                 mergedLinks[link.id] = link
@@ -616,24 +625,27 @@ public final class BoardStore: @unchecked Sendable {
             }
 
             let sessions = try await discovery.discoverSessions()
-            let existingLinks = try await coordinationStore.readLinks()
+            // Use in-memory state as source of truth — NOT disk.
+            // Disk reads race with async effect writes, causing duplicates.
+            let existingLinks = Array(state.links.values)
 
-            // Scan worktrees for each configured project
+            // Deduplicate repo roots — multiple projects can share the same repo
+            let uniqueRepoRoots = Set(configuredProjects.map(\.effectiveRepoRoot))
+
+            // Scan worktrees once per unique repo
             var worktreesByRepo: [String: [Worktree]] = [:]
             if let worktreeAdapter {
-                for project in configuredProjects {
-                    let repoRoot = project.effectiveRepoRoot
+                for repoRoot in uniqueRepoRoots {
                     if let worktrees = try? await worktreeAdapter.listWorktrees(repoRoot: repoRoot) {
                         worktreesByRepo[repoRoot] = worktrees
                     }
                 }
             }
 
-            // Fetch PRs for each configured project
+            // Fetch PRs once per unique repo
             var pullRequests: [String: PullRequest] = [:]
             if let ghAdapter {
-                for project in configuredProjects {
-                    let repoRoot = project.effectiveRepoRoot
+                for repoRoot in uniqueRepoRoots {
                     if let prs = try? await ghAdapter.fetchPRs(repoRoot: repoRoot) {
                         pullRequests.merge(prs, uniquingKeysWith: { existing, _ in existing })
                     }

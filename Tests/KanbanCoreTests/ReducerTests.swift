@@ -435,6 +435,28 @@ struct ReducerTests {
         #expect(state.links["card_sh1"]?.column == .backlog) // unchanged
     }
 
+    @Test("launchCard uses unique tmux name per card, not just project name")
+    func launchCardUniqueTmuxName() {
+        let link1 = makeLink(id: "card_a1", column: .backlog)
+        let link2 = makeLink(id: "card_b2", column: .backlog)
+        var state = stateWith([link1, link2])
+
+        let _ = Reducer.reduce(state: &state, action: .launchCard(
+            cardId: "card_a1", prompt: "test", projectPath: "/test/project",
+            worktreeName: nil, runRemotely: false, commandOverride: nil
+        ))
+        let _ = Reducer.reduce(state: &state, action: .launchCard(
+            cardId: "card_b2", prompt: "test", projectPath: "/test/project",
+            worktreeName: nil, runRemotely: false, commandOverride: nil
+        ))
+
+        let name1 = state.links["card_a1"]?.tmuxLink?.sessionName ?? ""
+        let name2 = state.links["card_b2"]?.tmuxLink?.sessionName ?? ""
+        #expect(name1 != name2) // Different cards in same project get different tmux names
+        #expect(name1.contains("project")) // Still includes project name for readability
+        #expect(name1.contains("card_a1")) // Includes card ID for uniqueness
+    }
+
     @Test("launchCard creates Claude terminal (not shell-only)")
     func launchCardNotShellOnly() {
         let link = makeLink(id: "card_cl1", column: .backlog)

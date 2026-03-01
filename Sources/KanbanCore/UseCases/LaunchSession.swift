@@ -10,6 +10,7 @@ public final class LaunchSession: SessionLauncher, @unchecked Sendable {
     }
 
     public func launch(
+        sessionName: String,
         projectPath: String,
         prompt: String,
         worktreeName: String?,
@@ -17,7 +18,6 @@ public final class LaunchSession: SessionLauncher, @unchecked Sendable {
         extraEnv: [String: String] = [:],
         commandOverride: String? = nil
     ) async throws -> String {
-        let sessionName = Self.tmuxSessionName(project: projectPath, worktree: worktreeName)
 
         let cmd: String
         if let commandOverride, !commandOverride.isEmpty {

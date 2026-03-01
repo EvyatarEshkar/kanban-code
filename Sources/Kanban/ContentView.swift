@@ -464,8 +464,34 @@ struct ContentView: View {
                 Button("") { selectProject(at: 8) }
                     .keyboardShortcut("9", modifiers: .command)
                     .hidden()
+
+                // Board navigation: Escape to deselect, Delete to delete
+                // Hidden buttons respect the responder chain — terminal/text fields get priority
+                Button("") { store.dispatch(.selectCard(cardId: nil)) }
+                    .keyboardShortcut(.escape, modifiers: [])
+                    .hidden()
+                Button("") {
+                    if let cardId = store.state.selectedCardId {
+                        pendingDeleteCardId = cardId
+                    }
+                }
+                    .keyboardShortcut(.delete, modifiers: [])
+                    .hidden()
             }
         } // NavigationStack
+        .focusable()
+        .onKeyPress(.downArrow) { navigateCard(.down); return .handled }
+        .onKeyPress(.upArrow) { navigateCard(.up); return .handled }
+        .onKeyPress(.rightArrow) { navigateCard(.right); return .handled }
+        .onKeyPress(.leftArrow) { navigateCard(.left); return .handled }
+        .onKeyPress(.return) {
+            // Only navigate when nothing else should handle Enter
+            guard store.state.selectedCardId != nil,
+                  pendingDeleteCardId == nil, pendingWorktreeCleanup == nil
+            else { return .ignored }
+            navigateCard(.open)
+            return .handled
+        }
     }
 
     /// Watch ~/.kanban/hook-events.jsonl for writes → post notification.
@@ -743,6 +769,83 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - Keyboard Navigation
+
+    private enum NavDirection { case up, down, left, right, open }
+
+    private func navigateCard(_ direction: NavDirection) {
+        let columns = store.state.visibleColumns
+        guard !columns.isEmpty else { return }
+
+        // If opening and a card is selected, just ensure inspector is visible (it already is via binding)
+        if direction == .open {
+            if store.state.selectedCardId == nil {
+                // Select first card in first non-empty column
+                for col in columns {
+                    let colCards = store.state.cards(in: col)
+                    if let first = colCards.first {
+                        store.dispatch(.selectCard(cardId: first.id))
+                        return
+                    }
+                }
+            }
+            return
+        }
+
+        // Find current card's column and index
+        guard let selectedId = store.state.selectedCardId else {
+            // Nothing selected — select first card in first non-empty column
+            for col in columns {
+                let colCards = store.state.cards(in: col)
+                if let first = colCards.first {
+                    store.dispatch(.selectCard(cardId: first.id))
+                    return
+                }
+            }
+            return
+        }
+
+        // Find which column and index the selected card is in
+        var currentCol: KanbanColumn?
+        var currentIndex = 0
+        for col in columns {
+            let colCards = store.state.cards(in: col)
+            if let idx = colCards.firstIndex(where: { $0.id == selectedId }) {
+                currentCol = col
+                currentIndex = idx
+                break
+            }
+        }
+
+        guard let col = currentCol else { return }
+        let colCards = store.state.cards(in: col)
+
+        switch direction {
+        case .down:
+            let nextIndex = min(currentIndex + 1, colCards.count - 1)
+            store.dispatch(.selectCard(cardId: colCards[nextIndex].id))
+        case .up:
+            let prevIndex = max(currentIndex - 1, 0)
+            store.dispatch(.selectCard(cardId: colCards[prevIndex].id))
+        case .left, .right:
+            guard let colIdx = columns.firstIndex(of: col) else { return }
+            let step = direction == .left ? -1 : 1
+            var targetColIdx = colIdx + step
+            // Skip empty columns
+            while targetColIdx >= 0, targetColIdx < columns.count {
+                let targetCards = store.state.cards(in: columns[targetColIdx])
+                if !targetCards.isEmpty {
+                    let targetIndex = min(currentIndex, targetCards.count - 1)
+                    store.dispatch(.selectCard(cardId: targetCards[targetIndex].id))
+                    return
+                }
+                targetColIdx += step
+            }
+        case .open:
+            break // handled above
+        }
+    }
+
     private func setSelectedProject(_ path: String?) {
         store.dispatch(.setSelectedProject(path))
         selectedProjectPersisted = path ?? ""
@@ -935,7 +1038,8 @@ struct ContentView: View {
     private func executeLaunch(cardId: String, prompt: String, projectPath: String, worktreeName: String?, runRemotely: Bool = true, commandOverride: String? = nil) {
         // IMMEDIATE state update via reducer — no more dual memory+disk writes
         store.dispatch(.launchCard(cardId: cardId, prompt: prompt, projectPath: projectPath, worktreeName: worktreeName, runRemotely: runRemotely, commandOverride: commandOverride))
-        let predictedTmuxName = LaunchSession.tmuxSessionName(project: projectPath, worktree: worktreeName)
+        // Reducer computed the unique tmux name and stored it in the link
+        let predictedTmuxName = store.state.links[cardId]?.tmuxLink?.sessionName ?? cardId
         KanbanLog.info("launch", "Starting launch for card=\(cardId.prefix(12)) tmux=\(predictedTmuxName) project=\(projectPath)")
 
         Task {
@@ -978,6 +1082,7 @@ struct ContentView: View {
                 )
 
                 let tmuxName = try await launcher.launch(
+                    sessionName: predictedTmuxName,
                     projectPath: projectPath,
                     prompt: prompt,
                     worktreeName: worktreeName,
