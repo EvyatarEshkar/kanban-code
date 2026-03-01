@@ -48,8 +48,6 @@ struct CardDetailView: View {
     @State private var prBody: String?
     @State private var isLoadingPRBody = false
 
-    // Delete confirmation
-    @State private var showDeleteConfirm = false
 
     // File watcher for real-time history
     @State private var historyWatcherFD: Int32 = -1
@@ -331,15 +329,6 @@ struct CardDetailView: View {
             Button("Restore") { performCheckpoint() }
         } message: {
             Text("Everything after this point will be removed. A .bkp backup will be created.")
-        }
-        .alert("Delete Card", isPresented: $showDeleteConfirm) {
-            Button("Cancel", role: .cancel) {}
-            Button("Delete", role: .destructive) {
-                onDeleteCard()
-                onDismiss()
-            }
-        } message: {
-            Text("This will permanently delete this card and its data.")
         }
     }
 
@@ -800,7 +789,7 @@ struct CardDetailView: View {
             }
 
             Divider()
-            Button(role: .destructive, action: { showDeleteConfirm = true }) {
+            Button(role: .destructive, action: { onDeleteCard(); onDismiss() }) {
                 Label("Delete Card", systemImage: "trash")
             }
         } label: {

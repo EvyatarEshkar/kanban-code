@@ -123,7 +123,7 @@ struct ContentView: View {
                 NSPasteboard.general.setString(cmd, forType: .string)
             },
             onCleanupWorktree: { cardId in Task { await cleanupWorktree(cardId: cardId) } },
-            onDeleteCard: { cardId in deleteCardWithCleanup(cardId: cardId) },
+            onDeleteCard: { cardId in pendingDeleteCardId = cardId },
             onRefreshBacklog: { Task { await boardState.refreshBacklog() } },
             onNewTask: { showNewTask = true }
         )
@@ -154,7 +154,7 @@ struct ContentView: View {
                             Task { await cleanupWorktree(cardId: card.id) }
                         },
                         onDeleteCard: {
-                            deleteCardWithCleanup(cardId: card.id)
+                            pendingDeleteCardId = card.id
                         },
                         onCreateTerminal: {
                             createExtraTerminal(cardId: card.id)
@@ -267,6 +267,25 @@ struct ContentView: View {
                 if let info = pendingWorktreeCleanup {
                     Text("The worktree path is on a remote machine:\n\n\(info.remotePath)\n\nThis will SSH to the remote to run git worktree remove, then delete the local synced copy at:\n\n\(info.localPath)")
                 }
+            }
+            .alert(
+                "Delete Card",
+                isPresented: Binding(
+                    get: { pendingDeleteCardId != nil },
+                    set: { if !$0 { pendingDeleteCardId = nil } }
+                )
+            ) {
+                Button("Delete", role: .destructive) {
+                    if let cardId = pendingDeleteCardId {
+                        deleteCardWithCleanup(cardId: cardId)
+                    }
+                    pendingDeleteCardId = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    pendingDeleteCardId = nil
+                }
+            } message: {
+                Text("This will permanently delete this card and its data.")
             }
             .task {
                 // Show onboarding wizard on first launch
@@ -1051,6 +1070,7 @@ struct ContentView: View {
     }
 
     @State private var pendingWorktreeCleanup: WorktreeCleanupInfo?
+    @State private var pendingDeleteCardId: String?
 
     struct WorktreeCleanupInfo: Identifiable {
         let id = UUID()
