@@ -29,6 +29,8 @@ Each card on the board is a living entity that automatically links your Claude s
 
 It's built for developers who run multiple Claude Code agents in parallel across multiple projects — locally or on remote machines — and need to stay on top of all of them.
 
+Kanban Code combines the lessons learned from five battle-tested open source tools into one unified experience: [claude-resume](https://github.com/langwatch/claude-resume) (session discovery, search, fork & checkpoint), [claude-remote](https://github.com/langwatch/claude-remote) (remote execution with file sync), [git-orchard](https://github.com/drewdrewthis/git-orchard) (tmux + worktree management), [claude-pushover](https://github.com/langwatch/claude-pushover) (push notifications with dedup), and [cc-amphetamine](https://github.com/rogeriochaves/cc-amphetamine) (sleep prevention).
+
 ## Features
 
 ### Kanban Board with Smart Columns
