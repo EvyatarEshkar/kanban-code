@@ -109,11 +109,13 @@ public struct RemoteSettings: Codable, Sendable {
     public var host: String
     public var remotePath: String
     public var localPath: String
+    public var syncIgnores: [String]?  // nil = use MutagenAdapter.defaultIgnores
 
-    public init(host: String, remotePath: String, localPath: String) {
+    public init(host: String, remotePath: String, localPath: String, syncIgnores: [String]? = nil) {
         self.host = host
         self.remotePath = remotePath
         self.localPath = localPath
+        self.syncIgnores = syncIgnores
     }
 }
 

@@ -79,17 +79,17 @@ public final class ClaudeCodeSessionStore: SessionStore, @unchecked Sendable {
         let queryTerms = BM25Scorer.tokenize(query)
         guard !queryTerms.isEmpty else { return [] }
 
-        // First pass: collect document stats
         struct DocInfo {
             let path: String
-            let tokens: [String]
+            let matchingTokens: [String]  // only tokens that match query terms
+            let wordCount: Int            // total word count for BM25 doc length
             let snippet: String
             let modifiedTime: Date
         }
 
         var docs: [DocInfo] = []
         var globalTermFreqs: [String: Int] = [:]
-        var totalTokenCount = 0
+        var totalWordCount = 0
 
         let fileManager = FileManager.default
 
@@ -104,32 +104,32 @@ public final class ClaudeCodeSessionStore: SessionStore, @unchecked Sendable {
         for (path, mtime) in validPaths {
             guard !Task.isCancelled else { break }
 
-            // Read file as Data (much faster than AsyncBytes line-by-line)
-            let textParts = readTextParts(from: path)
+            // Stream through file, only keeping tokens that match query terms
+            let (matchingTokens, wordCount, snippet) = extractMatchingTokens(
+                from: path, queryTerms: queryTerms
+            )
+            guard wordCount > 0 else { continue }
 
-            let fullText = textParts.joined(separator: " ")
-            guard !fullText.isEmpty else { continue }
-
-            let tokens = BM25Scorer.tokenize(fullText)
-
-            // Track document frequencies
-            let uniqueTokens = Set(tokens)
-            for token in uniqueTokens {
-                globalTermFreqs[token, default: 0] += 1
+            // Track document frequencies (which query terms appear in this doc)
+            let uniqueTerms = Set(matchingTokens)
+            for term in uniqueTerms {
+                globalTermFreqs[term, default: 0] += 1
             }
-            totalTokenCount += tokens.count
+            totalWordCount += wordCount
 
-            // Find best snippet
-            let snippet = findBestSnippet(text: fullText, queryTerms: queryTerms)
+            docs.append(DocInfo(
+                path: path,
+                matchingTokens: matchingTokens,
+                wordCount: wordCount,
+                snippet: snippet,
+                modifiedTime: mtime
+            ))
 
-            docs.append(DocInfo(path: path, tokens: tokens, snippet: snippet, modifiedTime: mtime))
-
-            // Yield to avoid blocking
             await Task.yield()
         }
 
         guard !docs.isEmpty else { return [] }
-        let avgDocLength = Double(totalTokenCount) / Double(docs.count)
+        let avgDocLength = Double(totalWordCount) / Double(docs.count)
 
         // Score each document
         var results: [SearchResult] = []
@@ -137,7 +137,7 @@ public final class ClaudeCodeSessionStore: SessionStore, @unchecked Sendable {
             let boost = BM25Scorer.recencyBoost(modifiedTime: doc.modifiedTime)
             let score = BM25Scorer.score(
                 terms: queryTerms,
-                documentTokens: doc.tokens,
+                documentTokens: doc.matchingTokens,
                 avgDocLength: avgDocLength,
                 docCount: docs.count,
                 docFreqs: globalTermFreqs,
@@ -151,70 +151,91 @@ public final class ClaudeCodeSessionStore: SessionStore, @unchecked Sendable {
         return results.sorted { $0.score > $1.score }
     }
 
-    /// Read text parts from a .jsonl file using synchronous Data loading (fast).
-    private func readTextParts(from path: String) -> [String] {
+    /// Stream through a .jsonl file, extracting only tokens that match query terms.
+    /// Returns (matchingTokens, totalWordCount, bestSnippet).
+    /// Streams the entire file with no size limit — only matching tokens are kept in memory.
+    private func extractMatchingTokens(
+        from path: String,
+        queryTerms: [String]
+    ) -> (tokens: [String], wordCount: Int, snippet: String) {
         guard let data = FileManager.default.contents(atPath: path),
               let content = String(data: data, encoding: .utf8) else {
-            return []
+            return ([], 0, "")
         }
 
-        // Limit to first 500KB of text to avoid huge files
-        let limit = 500_000
-        let searchContent = content.count > limit ? String(content.prefix(limit)) : content
+        var matchingTokens: [String] = []
+        var wordCount = 0
+        var bestSnippet = ""
+        var bestSnippetScore = 0
 
-        var textParts: [String] = []
-        for line in searchContent.split(separator: "\n", omittingEmptySubsequences: true) {
+        for line in content.split(separator: "\n", omittingEmptySubsequences: true) {
+            // Fast string check — skip lines that aren't user/assistant messages
             guard line.contains("\"type\"") else { continue }
-            guard let lineData = String(line).data(using: .utf8),
-                  let obj = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
-                  let type = obj["type"] as? String else { continue }
+            let lineStr = String(line)
+            guard lineStr.contains("\"user\"") || lineStr.contains("\"assistant\"") else { continue }
 
-            if type == "user" || type == "assistant" {
-                if let text = JsonlParser.extractTextContent(from: obj) {
-                    textParts.append(text)
+            guard let lineData = lineStr.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+                  let type = obj["type"] as? String,
+                  (type == "user" || type == "assistant"),
+                  let text = JsonlParser.extractTextContent(from: obj) else { continue }
+
+            // Tokenize and match — only keep tokens that match query terms
+            let docTokens = text.lowercased()
+                .components(separatedBy: CharacterSet.alphanumerics.inverted)
+                .filter { !$0.isEmpty && $0.count >= 2 }
+
+            wordCount += docTokens.count
+
+            for token in docTokens {
+                if let matched = matchQueryTerm(token: token, queryTerms: queryTerms) {
+                    matchingTokens.append(matched)
                 }
             }
+
+            // Track best snippet — check if this message has more query term matches
+            let lower = text.lowercased()
+            var snippetScore = 0
+            for qt in queryTerms {
+                if lower.contains(qt) { snippetScore += 1 }
+            }
+            if snippetScore > bestSnippetScore {
+                bestSnippetScore = snippetScore
+                bestSnippet = extractSnippet(from: text, queryTerms: queryTerms, role: type)
+            }
         }
-        return textParts
+
+        return (matchingTokens, wordCount, bestSnippet)
     }
 
-    /// Find the best snippet containing query terms.
-    private func findBestSnippet(text: String, queryTerms: [String]) -> String {
-        let lower = text.lowercased()
-        var bestStart = 0
-        var bestScore = 0
-
-        // Sliding window approach
-        let windowSize = 200
-        let step = 50
-
-        var offset = 0
-        while offset < lower.count {
-            let startIdx = lower.index(lower.startIndex, offsetBy: offset, limitedBy: lower.endIndex) ?? lower.endIndex
-            let endIdx = lower.index(startIdx, offsetBy: windowSize, limitedBy: lower.endIndex) ?? lower.endIndex
-            let window = String(lower[startIdx..<endIdx])
-
-            var score = 0
-            for term in queryTerms {
-                if window.contains(term) { score += 1 }
+    /// Check if a document token matches any query term (exact or prefix match).
+    private func matchQueryTerm(token: String, queryTerms: [String]) -> String? {
+        for qt in queryTerms {
+            if token == qt || token.hasPrefix(qt) || qt.hasPrefix(token) {
+                return qt  // normalize to query term for TF counting
             }
-
-            if score > bestScore {
-                bestScore = score
-                bestStart = offset
-            }
-
-            offset += step
         }
+        return nil
+    }
 
-        // Extract the snippet from original text
-        let startIdx = text.index(text.startIndex, offsetBy: bestStart, limitedBy: text.endIndex) ?? text.endIndex
-        let endIdx = text.index(startIdx, offsetBy: windowSize, limitedBy: text.endIndex) ?? text.endIndex
-        var snippet = String(text[startIdx..<endIdx])
-        if bestStart > 0 { snippet = "..." + snippet }
-        if endIdx < text.endIndex { snippet += "..." }
-
-        return snippet
+    /// Extract a snippet around the first query term match in text.
+    private func extractSnippet(from text: String, queryTerms: [String], role: String) -> String {
+        let lower = text.lowercased()
+        for qt in queryTerms {
+            if let range = lower.range(of: qt) {
+                let idx = lower.distance(from: lower.startIndex, to: range.lowerBound)
+                let start = max(0, idx - 40)
+                let end = min(text.count, idx + qt.count + 60)
+                let startIdx = text.index(text.startIndex, offsetBy: start)
+                let endIdx = text.index(text.startIndex, offsetBy: end)
+                let prefix = start > 0 ? "..." : ""
+                let suffix = end < text.count ? "..." : ""
+                let snippet = text[startIdx..<endIdx].replacingOccurrences(of: "\n", with: " ")
+                let label = role == "user" ? "You" : "Claude"
+                return "\(label): \(prefix)\(snippet)\(suffix)"
+            }
+        }
+        return String(text.prefix(100))
     }
 }
 

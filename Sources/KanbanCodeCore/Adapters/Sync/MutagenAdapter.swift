@@ -4,40 +4,46 @@ import Foundation
 public final class MutagenAdapter: SyncManagerPort, @unchecked Sendable {
     private let label: String
 
+    /// Default ignore patterns for mutagen sync (matching claude-remote + Swift/Rust).
+    public static let defaultIgnores: [String] = [
+        "node_modules", ".venv", ".cache", "dist", ".next*",
+        "__pycache__", ".pytest_cache", ".mypy_cache", ".turbo",
+        "*.pyc", ".DS_Store", "coverage", ".nyc_output",
+        "target", "build", ".build", ".swiftpm",
+    ]
+
     public init(label: String = "kanban") {
         self.label = label
     }
 
-    public func startSync(localPath: String, remotePath: String, name: String) async throws {
-        // Check for existing sync session to avoid duplicates
-        let existingStatuses = try await status()
-        if let existing = existingStatuses[name] {
-            if existing == .watching || existing == .staging {
-                // Already running — flush and return
-                try? await flushSync()
-                return
-            }
-            // Paused or error — terminate and recreate
-            try? await stopSync(name: name)
+    public func startSync(localPath: String, remotePath: String, name: String, ignores: [String] = MutagenAdapter.defaultIgnores) async throws {
+        // Check for existing session by name — avoids duplicates
+        // (Previous dict-based check failed when multiple sessions shared a name)
+        let listResult = try? await ShellCommand.run(
+            "/usr/bin/env",
+            arguments: ["mutagen", "sync", "list", "--name", name]
+        )
+        if let listResult, listResult.succeeded, listResult.stdout.contains("Name:") {
+            // Already running — just flush and return
+            try? await flushSync()
+            return
         }
 
-        let result = try await ShellCommand.run(
-            "/usr/bin/env",
-            arguments: [
-                "mutagen", "sync", "create",
-                localPath, remotePath,
-                "--name", name,
-                "--label", "\(label)=true",
-                "--sync-mode", "two-way-resolved",
-                "--default-file-mode-beta", "0644",
-                "--default-directory-mode-beta", "0755",
-                "--ignore-vcs",
-                "--ignore", "node_modules",
-                "--ignore", ".venv",
-                "--ignore", ".next",
-                "--ignore", "dist",
-            ]
-        )
+        var args = [
+            "mutagen", "sync", "create",
+            localPath, remotePath,
+            "--name", name,
+            "--label", "\(label)=true",
+            "--sync-mode", "two-way-resolved",
+            "--default-file-mode-beta", "0644",
+            "--default-directory-mode-beta", "0755",
+            "--ignore-vcs",
+        ]
+        for pattern in ignores {
+            args.append(contentsOf: ["--ignore", pattern])
+        }
+
+        let result = try await ShellCommand.run("/usr/bin/env", arguments: args)
         if !result.succeeded {
             throw MutagenError.createFailed(name: name, message: result.stderr)
         }

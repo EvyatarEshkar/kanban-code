@@ -1487,10 +1487,12 @@ struct ContentView: View {
 
                     let syncName = "kanban-code-\((projectPath as NSString).lastPathComponent)"
                     let remoteDest = "\(remote.host):\(remote.remotePath)"
+                    let ignores = remote.syncIgnores ?? MutagenAdapter.defaultIgnores
                     try? await mutagenAdapter.startSync(
                         localPath: remote.localPath,
                         remotePath: remoteDest,
-                        name: syncName
+                        name: syncName,
+                        ignores: ignores
                     )
                 } else {
                     shellOverride = nil
@@ -1780,10 +1782,12 @@ struct ContentView: View {
 
                     let syncName = "kanban-code-\((projectPath as NSString).lastPathComponent)"
                     let remoteDest = "\(remote.host):\(remote.remotePath)"
+                    let ignores = remote.syncIgnores ?? MutagenAdapter.defaultIgnores
                     try? await mutagenAdapter.startSync(
                         localPath: remote.localPath,
                         remotePath: remoteDest,
-                        name: syncName
+                        name: syncName,
+                        ignores: ignores
                     )
                 } else {
                     shellOverride = nil

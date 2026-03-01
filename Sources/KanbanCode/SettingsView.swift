@@ -419,6 +419,7 @@ struct RemoteSettingsView: View {
     @State private var remoteHost = ""
     @State private var remotePath = ""
     @State private var localPath = ""
+    @State private var syncIgnoresText = ""
     @State private var saveTask: Task<Void, Never>?
 
     private let settingsStore = SettingsStore()
@@ -436,6 +437,23 @@ struct RemoteSettingsView: View {
                     .textFieldStyle(.roundedBorder)
                     .onChange(of: localPath) { scheduleSave() }
             }
+
+            Section("Sync Ignores") {
+                Text("Patterns excluded from mutagen sync (one per line)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextEditor(text: $syncIgnoresText)
+                    .font(.system(.body, design: .monospaced))
+                    .frame(height: 140)
+                    .onChange(of: syncIgnoresText) { scheduleSave() }
+                HStack {
+                    Spacer()
+                    Button("Reset to Defaults") {
+                        syncIgnoresText = MutagenAdapter.defaultIgnores.joined(separator: "\n")
+                        scheduleSave()
+                    }
+                }
+            }
         }
         .formStyle(.grouped)
         .padding()
@@ -448,6 +466,8 @@ struct RemoteSettingsView: View {
             remoteHost = settings.remote?.host ?? ""
             remotePath = settings.remote?.remotePath ?? ""
             localPath = settings.remote?.localPath ?? ""
+            let ignores = settings.remote?.syncIgnores ?? MutagenAdapter.defaultIgnores
+            syncIgnoresText = ignores.joined(separator: "\n")
         } catch {}
     }
 
@@ -461,10 +481,15 @@ struct RemoteSettingsView: View {
                 if remoteHost.isEmpty && remotePath.isEmpty && localPath.isEmpty {
                     settings.remote = nil
                 } else {
+                    let ignores = syncIgnoresText
+                        .components(separatedBy: "\n")
+                        .map { $0.trimmingCharacters(in: .whitespaces) }
+                        .filter { !$0.isEmpty }
                     settings.remote = RemoteSettings(
                         host: remoteHost,
                         remotePath: remotePath,
-                        localPath: localPath
+                        localPath: localPath,
+                        syncIgnores: ignores == MutagenAdapter.defaultIgnores ? nil : ignores
                     )
                 }
                 try await settingsStore.write(settings)

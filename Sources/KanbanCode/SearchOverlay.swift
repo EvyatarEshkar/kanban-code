@@ -13,7 +13,7 @@ struct SearchOverlay: View {
     @State private var query = ""
     @State private var searchResults: [SearchResultItem] = []
     @State private var isDeepSearching = false
-    @State private var selectedIndex = 0
+    @State private var selectedIndex = -1
     @State private var searchTask: Task<Void, Never>?
     @FocusState private var isSearchFocused: Bool
 
@@ -85,6 +85,7 @@ struct SearchOverlay: View {
         .glassOverlay()
         .onAppear {
             isSearchFocused = true
+            selectedIndex = 0  // pre-select first recent session
         }
         .onExitCommand {
             isPresented = false
@@ -94,15 +95,19 @@ struct SearchOverlay: View {
             return .handled
         }
         .onKeyPress(.upArrow) {
-            selectedIndex = max(selectedIndex - 1, 0)
+            selectedIndex = max(selectedIndex - 1, -1)
             return .handled
         }
         .onKeyPress(.return) {
-            selectCurrentItem()
+            if selectedIndex >= 0 {
+                selectCurrentItem()
+            } else {
+                Task { await deepSearch() }
+            }
             return .handled
         }
         .onChange(of: query) { _, newValue in
-            selectedIndex = 0
+            selectedIndex = -1
             updateFilter(newValue)
         }
     }
@@ -193,7 +198,7 @@ struct SearchOverlay: View {
         let terms = queryTerms
         guard !terms.isEmpty else { return [] }
         return cards.filter { card in
-            let text = "\(card.displayTitle) \(card.projectName ?? "") \(card.link.worktreeLink?.branch ?? "") \(card.link.projectPath ?? "") \(card.session?.firstPrompt ?? "") \(card.link.promptBody ?? "")".lowercased()
+            let text = "\(card.displayTitle) \(card.projectName ?? "") \(card.link.worktreeLink?.branch ?? "") \(card.link.projectPath ?? "") \(card.session?.firstPrompt ?? "") \(card.link.promptBody ?? "") \(card.link.sessionLink?.sessionId ?? "") \(card.link.id)".lowercased()
             return terms.allSatisfy { text.contains($0) }
         }
     }

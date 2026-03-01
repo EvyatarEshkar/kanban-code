@@ -12,7 +12,7 @@ public enum SyncStatus: String, Sendable {
 /// Port for managing file synchronization (e.g., Mutagen).
 public protocol SyncManagerPort: Sendable {
     /// Start sync for a project.
-    func startSync(localPath: String, remotePath: String, name: String) async throws
+    func startSync(localPath: String, remotePath: String, name: String, ignores: [String]) async throws
 
     /// Stop sync for a project.
     func stopSync(name: String) async throws
