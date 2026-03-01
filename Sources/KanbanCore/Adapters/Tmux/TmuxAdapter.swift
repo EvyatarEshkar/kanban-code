@@ -39,12 +39,13 @@ public final class TmuxAdapter: TmuxManagerPort, @unchecked Sendable {
     }
 
     public func createSession(name: String, path: String, command: String?) async throws {
-        // Kill any stale session with the same name first.
-        // This handles the case where a card got disconnected from its tmux session
-        // (e.g., reconciler cleared the link) but the tmux session is still alive.
+        // If a session with this name already exists, reuse it.
+        // This prevents killing an active extra terminal whose SwiftTerm view
+        // has already attached via the retry loop — killing it would clear the
+        // terminal contents (the user sees a blank shell).
         let check = try await ShellCommand.run(tmuxPath, arguments: ["has-session", "-t", name])
         if check.succeeded {
-            _ = try? await ShellCommand.run(tmuxPath, arguments: ["kill-session", "-t", name])
+            return
         }
 
         var args = ["new-session", "-d", "-s", name, "-c", path]

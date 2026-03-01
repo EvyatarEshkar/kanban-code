@@ -58,6 +58,7 @@ struct CardDetailView: View {
     // Multi-terminal
     @State private var selectedTerminalSession: String?
     @State private var knownTerminalCount: Int = 0
+    @State private var terminalGrabFocus: Bool = false
 
     /// Launch lock older than 30s is stale — stop showing spinner, show terminal instead
     private var isLaunchStale: Bool {
@@ -277,6 +278,7 @@ struct CardDetailView: View {
             prBody = nil
             isLoadingPRBody = false
             selectedTerminalSession = nil
+            terminalGrabFocus = false
             // Reset tab to a valid one for this card
             selectedTab = defaultTab(for: card)
             // Resolve GitHub base URL for constructing issue/PR links
@@ -294,6 +296,9 @@ struct CardDetailView: View {
             }
         }
         .onChange(of: selectedTab) {
+            if selectedTab == .terminal {
+                terminalGrabFocus = true
+            }
             if selectedTab == .history {
                 Task { await loadHistory() }
                 startHistoryWatcher()
@@ -374,6 +379,7 @@ struct CardDetailView: View {
                                 HStack(spacing: 0) {
                                     Button {
                                         selectedTerminalSession = sessionName
+                                        terminalGrabFocus = true
                                     } label: {
                                         HStack(spacing: 4) {
                                             let isShellOnly = tmux.isShellOnly == true
@@ -456,7 +462,8 @@ struct CardDetailView: View {
                 // shown/hidden on tab switch — no SwiftUI view recreation.
                 TerminalContainerView(
                     sessions: allSessions,
-                    activeSession: currentSession
+                    activeSession: currentSession,
+                    grabFocus: terminalGrabFocus
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }

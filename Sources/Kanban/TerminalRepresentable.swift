@@ -104,13 +104,16 @@ struct TerminalContainerView: NSViewRepresentable {
     let sessions: [String]
     /// Which session is currently visible.
     let activeSession: String
+    /// When true, the terminal grabs keyboard focus (user clicked a tab).
+    /// When false, the terminal is shown but focus stays where it was (keyboard nav, drawer open).
+    var grabFocus: Bool = false
 
     func makeNSView(context: Context) -> TerminalContainerNSView {
         let container = TerminalContainerNSView()
         for session in sessions {
             container.ensureTerminal(for: session)
         }
-        container.showTerminal(for: activeSession)
+        container.showTerminal(for: activeSession, grabFocus: grabFocus)
         return container
     }
 
@@ -122,7 +125,7 @@ struct TerminalContainerView: NSViewRepresentable {
         // Remove terminals that are no longer in the list
         nsView.removeTerminalsNotIn(Set(sessions))
         // Switch visible terminal
-        nsView.showTerminal(for: activeSession)
+        nsView.showTerminal(for: activeSession, grabFocus: grabFocus)
     }
 
     static func dismantleNSView(_ nsView: TerminalContainerNSView, coordinator: ()) {
@@ -168,14 +171,13 @@ final class TerminalContainerNSView: NSView {
     }
 
     /// Show only the terminal for `sessionName`, hide all others.
-    func showTerminal(for sessionName: String) {
+    func showTerminal(for sessionName: String, grabFocus: Bool = false) {
         activeSession = sessionName
         for name in managedSessions {
             let terminal = TerminalCache.shared.terminal(for: name, frame: bounds)
             let isActive = (name == sessionName)
             terminal.isHidden = !isActive
-            if isActive {
-                // Grab keyboard focus so the user can type immediately
+            if isActive, grabFocus {
                 window?.makeFirstResponder(terminal)
             }
         }

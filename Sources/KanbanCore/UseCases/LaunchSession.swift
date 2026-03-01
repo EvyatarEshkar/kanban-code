@@ -43,6 +43,10 @@ public final class LaunchSession: SessionLauncher, @unchecked Sendable {
             cmd = built
         }
 
+        // Kill any stale session with the same name before launching.
+        // This handles disconnected cards where the old tmux session lingers.
+        try? await tmux.killSession(name: sessionName)
+
         try await tmux.createSession(name: sessionName, path: projectPath, command: cmd)
         return sessionName
     }
