@@ -3,6 +3,7 @@ import Foundation
 /// Manages Mutagen sync sessions via the mutagen CLI.
 public final class MutagenAdapter: SyncManagerPort, @unchecked Sendable {
     private let label: String
+    private let mutagenPath: String
 
     /// Default ignore patterns for mutagen sync (matching claude-remote + Swift/Rust).
     public static let defaultIgnores: [String] = [
@@ -14,14 +15,15 @@ public final class MutagenAdapter: SyncManagerPort, @unchecked Sendable {
 
     public init(label: String = "kanban") {
         self.label = label
+        self.mutagenPath = ShellCommand.findExecutable("mutagen") ?? "mutagen"
     }
 
     public func startSync(localPath: String, remotePath: String, name: String, ignores: [String] = MutagenAdapter.defaultIgnores) async throws {
         // Check for existing session by name — avoids duplicates
         // (Previous dict-based check failed when multiple sessions shared a name)
         let listResult = try? await ShellCommand.run(
-            "/usr/bin/env",
-            arguments: ["mutagen", "sync", "list", "--name", name]
+            mutagenPath,
+            arguments: ["sync", "list", "--name", name]
         )
         if let listResult, listResult.succeeded, listResult.stdout.contains("Name:") {
             // Already running — just flush and return
@@ -30,7 +32,7 @@ public final class MutagenAdapter: SyncManagerPort, @unchecked Sendable {
         }
 
         var args = [
-            "mutagen", "sync", "create",
+            "sync", "create",
             localPath, remotePath,
             "--name", name,
             "--label", "\(label)=true",
@@ -43,7 +45,7 @@ public final class MutagenAdapter: SyncManagerPort, @unchecked Sendable {
             args.append(contentsOf: ["--ignore", pattern])
         }
 
-        let result = try await ShellCommand.run("/usr/bin/env", arguments: args)
+        let result = try await ShellCommand.run(mutagenPath, arguments: args)
         if !result.succeeded {
             throw MutagenError.createFailed(name: name, message: result.stderr)
         }
@@ -56,8 +58,8 @@ public final class MutagenAdapter: SyncManagerPort, @unchecked Sendable {
 
     public func stopSync(name: String) async throws {
         let result = try await ShellCommand.run(
-            "/usr/bin/env",
-            arguments: ["mutagen", "sync", "terminate", "--name", name]
+            mutagenPath,
+            arguments: ["sync", "terminate", "--name", name]
         )
         if !result.succeeded {
             throw MutagenError.terminateFailed(name: name, message: result.stderr)
@@ -66,8 +68,8 @@ public final class MutagenAdapter: SyncManagerPort, @unchecked Sendable {
 
     public func flushSync() async throws {
         let result = try await ShellCommand.run(
-            "/usr/bin/env",
-            arguments: ["mutagen", "sync", "flush", "--label-selector", "\(label)=true"]
+            mutagenPath,
+            arguments: ["sync", "flush", "--label-selector", "\(label)=true"]
         )
         if !result.succeeded {
             throw MutagenError.flushFailed(message: result.stderr)
@@ -76,9 +78,9 @@ public final class MutagenAdapter: SyncManagerPort, @unchecked Sendable {
 
     public func status() async throws -> [String: SyncStatus] {
         let result = try await ShellCommand.run(
-            "/usr/bin/env",
+            mutagenPath,
             arguments: [
-                "mutagen", "sync", "list",
+                "sync", "list",
                 "--label-selector", "\(label)=true",
                 "--output", "json",
             ]
@@ -111,8 +113,8 @@ public final class MutagenAdapter: SyncManagerPort, @unchecked Sendable {
 
     public func rawStatus() async throws -> String {
         let result = try await ShellCommand.run(
-            "/usr/bin/env",
-            arguments: ["mutagen", "sync", "list", "-l"]
+            mutagenPath,
+            arguments: ["sync", "list", "-l"]
         )
         let output = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         if output.isEmpty {
@@ -122,7 +124,7 @@ public final class MutagenAdapter: SyncManagerPort, @unchecked Sendable {
     }
 
     public func isAvailable() async -> Bool {
-        await ShellCommand.isAvailable("mutagen")
+        ShellCommand.findExecutable("mutagen") != nil
     }
 }
 

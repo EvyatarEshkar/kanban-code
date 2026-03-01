@@ -124,6 +124,21 @@ struct CardDetailView: View {
                             .help(isStart ? "Start work on this task" : "Resume session")
                         }
 
+                        if let path = card.link.worktreeLink?.path ?? card.link.projectPath {
+                            Button {
+                                let url = URL(fileURLWithPath: path)
+                                NSWorkspace.shared.open(url)
+                            } label: {
+                                Image(systemName: "chevron.left.forwardslash.chevron.right")
+                                    .font(.system(size: 13))
+                                    .frame(width: 36, height: 36)
+                            }
+                            .buttonStyle(.plain)
+                            .glassEffect(.regular, in: .capsule)
+                            .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
+                            .help("Open in editor")
+                        }
+
                         actionsMenu
                             .frame(width: 36, height: 36)
                             .glassEffect(.regular, in: .capsule)
@@ -841,7 +856,7 @@ struct CardDetailView: View {
                     Label {
                         Text("Copy Session ID")
                     } icon: {
-                        ClawdIcon().frame(width: 14, height: 14)
+                        ClawdIcon().frame(width: 11, height: 11)
                     }
                 }
             }

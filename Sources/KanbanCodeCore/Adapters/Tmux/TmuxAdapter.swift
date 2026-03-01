@@ -5,17 +5,7 @@ public final class TmuxAdapter: TmuxManagerPort, @unchecked Sendable {
     private let tmuxPath: String
 
     public init(tmuxPath: String? = nil) {
-        self.tmuxPath = tmuxPath ?? Self.findTmux()
-    }
-
-    /// Resolve tmux path: check common locations, fall back to bare "tmux" for PATH lookup.
-    private static func findTmux() -> String {
-        for candidate in ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"] {
-            if FileManager.default.isExecutableFile(atPath: candidate) {
-                return candidate
-            }
-        }
-        return "tmux" // Let the shell resolve it via PATH
+        self.tmuxPath = tmuxPath ?? ShellCommand.findExecutable("tmux") ?? "tmux"
     }
 
     public func listSessions() async throws -> [TmuxSession] {
@@ -113,7 +103,7 @@ public final class TmuxAdapter: TmuxManagerPort, @unchecked Sendable {
     }
 
     public func isAvailable() async -> Bool {
-        await ShellCommand.isAvailable("tmux")
+        ShellCommand.findExecutable("tmux") != nil
     }
 }
 

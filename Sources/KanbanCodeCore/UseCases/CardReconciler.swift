@@ -252,7 +252,8 @@ public enum CardReconciler {
 
             // Clear dead tmux links (tmux session no longer exists)
             // Only clear if we actually scanned tmux (avoid clearing when snapshot has no tmux data)
-            if var tmux = link.tmuxLink, !link.manualOverrides.tmuxSession, didScanTmux {
+            // Skip cards mid-launch — the tmux session may not be visible yet
+            if var tmux = link.tmuxLink, link.isLaunching != true, !link.manualOverrides.tmuxSession, didScanTmux {
                 let primaryAlive = liveTmuxNames.contains(tmux.sessionName)
 
                 // Filter dead extra sessions

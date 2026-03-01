@@ -67,7 +67,8 @@ public enum DependencyChecker {
 
     /// Check if `gh` CLI is authenticated (exit code 0 = logged in).
     private static func checkGhAuth() async -> Bool {
-        guard let result = try? await ShellCommand.run("/usr/bin/env", arguments: ["gh", "auth", "status"]) else {
+        guard let ghPath = ShellCommand.findExecutable("gh"),
+              let result = try? await ShellCommand.run(ghPath, arguments: ["auth", "status"]) else {
             return false
         }
         return result.succeeded

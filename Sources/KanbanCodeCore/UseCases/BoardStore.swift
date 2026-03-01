@@ -144,6 +144,7 @@ public enum Action: Sendable {
     // Background reconciliation
     case reconciled(ReconciliationResult)
     case gitHubIssuesUpdated(links: [Link])
+    case activityChanged([String: ActivityState]) // sessionId → state
 
     // Busy state (transient spinners)
     case setBusy(cardId: String, busy: Bool)
@@ -670,6 +671,23 @@ public enum Reducer {
             state.lastGitHubRefresh = Date()
             return [.persistLinks(Array(state.links.values))]
 
+        case .activityChanged(let activityMap):
+            // Lightweight column update — no full reconciliation, just activity → column
+            var changed = false
+            for (id, var link) in state.links where link.isLaunching != true {
+                guard let sessionId = link.sessionLink?.sessionId,
+                      let activity = activityMap[sessionId] else { continue }
+                let hasWorktree = link.worktreeLink?.branch != nil
+                let oldColumn = link.column
+                UpdateCardColumn.update(link: &link, activityState: activity, hasWorktree: hasWorktree)
+                if link.column != oldColumn {
+                    state.links[id] = link
+                    changed = true
+                }
+            }
+            state.activityMap = activityMap
+            return changed ? [.persistLinks(Array(state.links.values))] : []
+
         // MARK: Busy State
 
         case .setBusy(let cardId, let busy):
@@ -779,6 +797,24 @@ public final class BoardStore: @unchecked Sendable {
             }
         default:
             break
+        }
+    }
+
+    // MARK: - Activity Refresh (fast path)
+
+    /// Lightweight activity-only refresh. Queries the activity detector for all
+    /// sessions with hook data and recomputes columns immediately — no discovery,
+    /// no worktree scan, no PR fetch. Runs in <1ms.
+    public func refreshActivity() async {
+        guard let activityDetector else { return }
+        var activityMap: [String: ActivityState] = [:]
+        for (_, link) in state.links {
+            guard let sessionId = link.sessionLink?.sessionId else { continue }
+            let activity = await activityDetector.activityState(for: sessionId)
+            activityMap[sessionId] = activity
+        }
+        if !activityMap.isEmpty {
+            dispatch(.activityChanged(activityMap))
         }
     }
 

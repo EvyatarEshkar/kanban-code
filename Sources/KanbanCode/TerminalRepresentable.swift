@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import SwiftTerm
+import KanbanCodeCore
 
 // MARK: - Terminal process cache
 
@@ -29,14 +30,7 @@ final class TerminalCache {
     private var startedSessions: Set<String> = []
 
     /// Resolved tmux binary path — checked once, reused for all terminals.
-    private static let tmuxPath: String = {
-        for candidate in ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"] {
-            if FileManager.default.isExecutableFile(atPath: candidate) {
-                return candidate
-            }
-        }
-        return "tmux"
-    }()
+    private static let tmuxPath: String = ShellCommand.findExecutable("tmux") ?? "tmux"
 
     /// Get or create a terminal view for the given tmux session name.
     /// The process is NOT started here — call `startProcessIfNeeded` after layout
@@ -187,7 +181,14 @@ final class TerminalContainerNSView: NSView {
             terminal.removeFromSuperview()
             addSubview(terminal)
         }
-        terminal.frame = bounds
+        // Only set frame if bounds are non-zero. For cached terminals with a
+        // running tmux process, setting frame to .zero triggers SIGWINCH which
+        // causes tmux to re-render at 0 columns (single vertical line).
+        // layout() will set the correct frame once SwiftUI provides real bounds.
+        if bounds.width > 0 && bounds.height > 0 {
+            let inset = bounds.insetBy(dx: Self.terminalPadding, dy: Self.terminalPadding)
+            terminal.frame = inset
+        }
         terminal.isHidden = true
         managedSessions.append(sessionName)
     }

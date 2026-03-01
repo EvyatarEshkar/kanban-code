@@ -34,9 +34,10 @@ public enum MarkdownImageRenderer {
             try markdown.write(toFile: mdPath, atomically: true, encoding: .utf8)
 
             // Convert markdown → HTML with pandoc
+            guard let pandocPath = ShellCommand.findExecutable("pandoc") else { return nil }
             let pandocResult = try await ShellCommand.run(
-                "/usr/bin/env",
-                arguments: ["pandoc", "-f", "gfm", "-t", "html", "--standalone",
+                pandocPath,
+                arguments: ["-f", "gfm", "-t", "html", "--standalone",
                            "--metadata", "title= ",
                            "--css", "/dev/null",
                            mdPath, "-o", htmlPath]
@@ -49,10 +50,10 @@ public enum MarkdownImageRenderer {
             try html.write(toFile: htmlPath, atomically: true, encoding: .utf8)
 
             // Render HTML → PNG with wkhtmltoimage
+            guard let wkhtmlPath = ShellCommand.findExecutable("wkhtmltoimage") else { return nil }
             let imgResult = try await ShellCommand.run(
-                "/usr/bin/env",
-                arguments: ["wkhtmltoimage",
-                           "--quality", "90",
+                wkhtmlPath,
+                arguments: ["--quality", "90",
                            "--width", "600",
                            "--disable-smart-width",
                            htmlPath, imgPath]

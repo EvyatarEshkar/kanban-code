@@ -796,8 +796,9 @@ struct ProjectEditSheet: View {
         let filterArgs = githubFilter.split(separator: " ").map(String.init)
         Task.detached {
             let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = ["gh", "search", "issues", "--limit", "100", "--json", "number"] + filterArgs
+            let ghPath = ShellCommand.findExecutable("gh") ?? "gh"
+            process.executableURL = URL(fileURLWithPath: ghPath)
+            process.arguments = ["search", "issues", "--limit", "100", "--json", "number"] + filterArgs
             let pipe = Pipe()
             process.standardOutput = pipe
             process.standardError = Pipe()

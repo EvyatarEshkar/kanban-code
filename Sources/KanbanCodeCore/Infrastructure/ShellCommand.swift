@@ -49,11 +49,26 @@ public enum ShellCommand {
 
     /// Check if a command is available on the system.
     public static func isAvailable(_ command: String) async -> Bool {
-        do {
-            let result = try await run("/usr/bin/which", arguments: [command])
-            return result.succeeded
-        } catch {
-            return false
+        findExecutable(command) != nil
+    }
+
+    /// Resolve a command name to an absolute path by checking common locations.
+    /// macOS .app bundles have a minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin),
+    /// so Homebrew and other tools aren't found via `env` or `which`.
+    /// Returns nil if the command isn't found anywhere.
+    public static func findExecutable(_ command: String) -> String? {
+        let searchPaths = [
+            "/opt/homebrew/bin",    // Homebrew (Apple Silicon)
+            "/usr/local/bin",       // Homebrew (Intel) / manual installs
+            "/usr/bin",             // System binaries
+            "/bin",                 // Core system binaries
+        ]
+        for dir in searchPaths {
+            let path = "\(dir)/\(command)"
+            if FileManager.default.isExecutableFile(atPath: path) {
+                return path
+            }
         }
+        return nil
     }
 }

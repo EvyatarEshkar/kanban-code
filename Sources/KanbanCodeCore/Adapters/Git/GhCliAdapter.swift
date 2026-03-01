@@ -2,15 +2,18 @@ import Foundation
 
 /// GitHub integration via the `gh` CLI tool.
 public final class GhCliAdapter: PRTrackerPort, @unchecked Sendable {
+    private let ghPath: String
 
-    public init() {}
+    public init() {
+        self.ghPath = ShellCommand.findExecutable("gh") ?? "gh"
+    }
 
     public func fetchPRs(repoRoot: String) async throws -> [String: PullRequest] {
         KanbanCodeLog.info("gh", "fetchPRs for \(repoRoot)")
         let result = try await ShellCommand.run(
-            "/usr/bin/env",
+            ghPath,
             arguments: [
-                "gh", "pr", "list", "--state", "all", "--limit", "50",
+                "pr", "list", "--state", "all", "--limit", "50",
                 "--json", "number,title,state,url,headRefName,reviewDecision",
             ],
             currentDirectory: repoRoot
@@ -88,8 +91,8 @@ public final class GhCliAdapter: PRTrackerPort, @unchecked Sendable {
 
         // Get repo owner/name
         let repoResult = try await ShellCommand.run(
-            "/usr/bin/env",
-            arguments: ["gh", "repo", "view", "--json", "owner,name"],
+            ghPath,
+            arguments: ["repo", "view", "--json", "owner,name"],
             currentDirectory: repoRoot
         )
         guard repoResult.succeeded,
@@ -110,8 +113,8 @@ public final class GhCliAdapter: PRTrackerPort, @unchecked Sendable {
         """
 
         let graphqlResult = try await ShellCommand.run(
-            "/usr/bin/env",
-            arguments: ["gh", "api", "graphql", "-f", "query=\(query)"],
+            ghPath,
+            arguments: ["api", "graphql", "-f", "query=\(query)"],
             currentDirectory: repoRoot
         )
 
@@ -208,8 +211,8 @@ public final class GhCliAdapter: PRTrackerPort, @unchecked Sendable {
 
         // Get repo owner/name
         let repoResult = try await ShellCommand.run(
-            "/usr/bin/env",
-            arguments: ["gh", "repo", "view", "--json", "owner,name"],
+            ghPath,
+            arguments: ["repo", "view", "--json", "owner,name"],
             currentDirectory: repoRoot
         )
         guard repoResult.succeeded,
@@ -256,8 +259,8 @@ public final class GhCliAdapter: PRTrackerPort, @unchecked Sendable {
         """
 
         let result = try await ShellCommand.run(
-            "/usr/bin/env",
-            arguments: ["gh", "api", "graphql", "-f", "query=\(query)"],
+            ghPath,
+            arguments: ["api", "graphql", "-f", "query=\(query)"],
             currentDirectory: repoRoot
         )
 
@@ -313,8 +316,8 @@ public final class GhCliAdapter: PRTrackerPort, @unchecked Sendable {
 
     public func fetchPRBody(repoRoot: String, prNumber: Int) async throws -> String? {
         let result = try await ShellCommand.run(
-            "/usr/bin/env",
-            arguments: ["gh", "pr", "view", "\(prNumber)", "--json", "body"],
+            ghPath,
+            arguments: ["pr", "view", "\(prNumber)", "--json", "body"],
             currentDirectory: repoRoot
         )
         guard result.succeeded, !result.stdout.isEmpty,
@@ -327,12 +330,11 @@ public final class GhCliAdapter: PRTrackerPort, @unchecked Sendable {
     }
 
     public func isAvailable() async -> Bool {
-        let available = await ShellCommand.isAvailable("gh")
-        guard available else { return false }
+        guard ShellCommand.findExecutable("gh") != nil else { return false }
 
         // Check auth status
         do {
-            let result = try await ShellCommand.run("/usr/bin/env", arguments: ["gh", "auth", "status"])
+            let result = try await ShellCommand.run(ghPath, arguments: ["auth", "status"])
             return result.succeeded
         } catch {
             return false
@@ -342,9 +344,9 @@ public final class GhCliAdapter: PRTrackerPort, @unchecked Sendable {
     /// Fetch GitHub issues matching a filter query.
     public func fetchIssues(repoRoot: String, filter: String) async throws -> [GitHubIssue] {
         let result = try await ShellCommand.run(
-            "/usr/bin/env",
+            ghPath,
             arguments: [
-                "gh", "search", "issues", "--match", "title,body",
+                "search", "issues", "--match", "title,body",
                 "--json", "number,title,body,url,labels",
                 "--limit", "25",
                 filter,

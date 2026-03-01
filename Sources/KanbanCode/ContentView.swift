@@ -483,7 +483,10 @@ struct ContentView: View {
             .onReceive(NotificationCenter.default.publisher(for: .kanbanCodeHookEvent)) { _ in
                 Task {
                     await orchestrator.processHookEvents()
-                    await store.reconcile()
+                    // Fast path: update activity states and columns immediately
+                    // without waiting for full reconciliation (which may be blocked
+                    // or take seconds due to discovery/PR fetching)
+                    await store.refreshActivity()
                     systemTray.update()
                 }
             }
