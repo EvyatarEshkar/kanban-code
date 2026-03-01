@@ -523,7 +523,8 @@ struct OnboardingWizard: View {
                 try await client.sendNotification(
                     title: "Kanban Test",
                     message: "Notifications are working!",
-                    imageData: nil
+                    imageData: nil,
+                    cardId: nil
                 )
                 testResult = "Sent!"
             } catch {

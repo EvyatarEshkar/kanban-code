@@ -114,7 +114,8 @@ struct CardReconcilerTests {
             ],
             tmuxSessions: [
                 TmuxSession(name: "fix-auth", path: "/project/.claude/worktrees/fix-auth", attached: false)
-            ]
+            ],
+            didScanTmux: true
         )
 
         let result = CardReconciler.reconcile(existing: [manualCard], snapshot: snapshot)
@@ -147,7 +148,8 @@ struct CardReconcilerTests {
             ],
             tmuxSessions: [
                 TmuxSession(name: "issue-123", path: "/worktree", attached: false)
-            ]
+            ],
+            didScanTmux: true
         )
 
         let result = CardReconciler.reconcile(existing: [issueCard], snapshot: snapshot)
@@ -265,13 +267,33 @@ struct CardReconcilerTests {
         ]
         let snapshot = CardReconciler.DiscoverySnapshot(
             sessions: [Session(id: "s1", messageCount: 1, modifiedTime: .now)],
-            tmuxSessions: [TmuxSession(name: "other-alive", path: "/tmp")] // Tmux scanned, but "dead-session" not in list
+            tmuxSessions: [TmuxSession(name: "other-alive", path: "/tmp")], // Tmux scanned, but "dead-session" not in list
+            didScanTmux: true
         )
 
         let result = CardReconciler.reconcile(existing: existing, snapshot: snapshot)
         #expect(result.count == 1)
         #expect(result[0].tmuxLink == nil) // Cleared
         #expect(result[0].sessionLink?.sessionId == "s1") // Session still there
+    }
+
+    @Test("Dead tmux cleared even when zero sessions exist (server killed)")
+    func deadTmuxClearedAllDead() {
+        let existing = [
+            Link(
+                column: .inProgress,
+                tmuxLink: TmuxLink(sessionName: "test", extraSessions: ["test-sh1", "test-sh2"])
+            )
+        ]
+        // Tmux was scanned but found nothing (tmux kill-server)
+        let snapshot = CardReconciler.DiscoverySnapshot(
+            tmuxSessions: [],
+            didScanTmux: true
+        )
+
+        let result = CardReconciler.reconcile(existing: existing, snapshot: snapshot)
+        #expect(result.count == 1)
+        #expect(result[0].tmuxLink == nil) // All cleared
     }
 
     @Test("Tmux link preserved when tmux not scanned")
@@ -324,7 +346,8 @@ struct CardReconcilerTests {
         link.manualOverrides.tmuxSession = true
 
         let snapshot = CardReconciler.DiscoverySnapshot(
-            tmuxSessions: [] // Dead
+            tmuxSessions: [], // Dead
+            didScanTmux: true
         )
 
         let result = CardReconciler.reconcile(existing: [link], snapshot: snapshot)

@@ -5,11 +5,19 @@ import Foundation
 @Suite("AssignColumn")
 struct AssignColumnTests {
 
-    @Test("Manual column override is respected")
-    func manualOverride() {
+    @Test("Actively working overrides manual column")
+    func activelyWorkingOverridesManual() {
         var link = Link(column: .done, sessionLink: SessionLink(sessionId: "s1"))
         link.manualOverrides.column = true
         let col = AssignColumn.assign(link: link, activityState: .activelyWorking)
+        #expect(col == .inProgress)
+    }
+
+    @Test("Manual column override respected when not actively working")
+    func manualOverrideWhenIdle() {
+        var link = Link(column: .done, sessionLink: SessionLink(sessionId: "s1"))
+        link.manualOverrides.column = true
+        let col = AssignColumn.assign(link: link, activityState: .idleWaiting)
         #expect(col == .done)
     }
 
@@ -127,6 +135,21 @@ struct AssignColumnTests {
 
     @Test("Manual task without session → backlog")
     func manualTaskBacklog() {
+        let link = Link(source: .manual)
+        let col = AssignColumn.assign(link: link)
+        #expect(col == .backlog)
+    }
+
+    @Test("Manual task with tmuxLink but no session → inProgress (launching)")
+    func manualTaskWithTmuxLinkInProgress() {
+        var link = Link(source: .manual)
+        link.tmuxLink = TmuxLink(sessionName: "test-project")
+        let col = AssignColumn.assign(link: link)
+        #expect(col == .inProgress)
+    }
+
+    @Test("Manual task without tmuxLink or session → backlog (not launched)")
+    func manualTaskWithoutTmuxLinkBacklog() {
         let link = Link(source: .manual)
         let col = AssignColumn.assign(link: link)
         #expect(col == .backlog)

@@ -94,6 +94,6 @@ public final class RemoteStatusWatcher: @unchecked Sendable {
             message = "Remote connection to \(host) restored"
         }
 
-        try? await notifier.sendNotification(title: title, message: message, imageData: nil)
+        try? await notifier.sendNotification(title: title, message: message, imageData: nil, cardId: nil)
     }
 }

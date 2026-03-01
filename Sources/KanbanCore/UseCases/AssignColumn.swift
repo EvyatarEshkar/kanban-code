@@ -12,10 +12,17 @@ public enum AssignColumn {
         allPRsDone: Bool = false,
         hasWorktree: Bool = false
     ) -> KanbanColumn {
-        // Terminal states always win — these are definitive regardless of manual drag
+        // Archive always wins
         if link.manuallyArchived {
             return .allSessions
         }
+
+        // Actively working always shows in progress, regardless of PR state or manual drag
+        if activityState == .activelyWorking {
+            return .inProgress
+        }
+
+        // Terminal PR state
         if allPRsDone {
             return .done
         }
@@ -36,7 +43,7 @@ public enum AssignColumn {
         if let state = activityState {
             switch state {
             case .activelyWorking:
-                return .inProgress
+                return .inProgress // Already handled above, but keep for exhaustive switch
             case .needsAttention:
                 return .waiting
             case .idleWaiting:
@@ -56,7 +63,12 @@ public enum AssignColumn {
         }
 
         // Manual task without a session yet → backlog
+        // BUT if tmuxLink is set, it's being actively launched → stay in progress
         if link.source == .manual && link.sessionLink == nil {
+            if link.tmuxLink != nil {
+                KanbanLog.info("assign-column", "Manual card \(link.id.prefix(12)) has tmuxLink → inProgress (launching)")
+                return .inProgress
+            }
             return .backlog
         }
 

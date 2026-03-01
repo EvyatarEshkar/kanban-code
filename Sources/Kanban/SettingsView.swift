@@ -401,7 +401,8 @@ struct NotificationSettingsView: View {
                 try await client.sendNotification(
                     title: "Kanban Test",
                     message: "Notifications are working!",
-                    imageData: nil
+                    imageData: nil,
+                    cardId: nil
                 )
                 testResult = "Sent!"
             } catch {
@@ -418,20 +419,57 @@ struct RemoteSettingsView: View {
     @State private var remoteHost = ""
     @State private var remotePath = ""
     @State private var localPath = ""
+    @State private var saveTask: Task<Void, Never>?
+
+    private let settingsStore = SettingsStore()
 
     var body: some View {
         Form {
             Section("SSH") {
                 TextField("Remote Host", text: $remoteHost)
                     .textFieldStyle(.roundedBorder)
+                    .onChange(of: remoteHost) { scheduleSave() }
                 TextField("Remote Path", text: $remotePath)
                     .textFieldStyle(.roundedBorder)
+                    .onChange(of: remotePath) { scheduleSave() }
                 TextField("Local Path", text: $localPath)
                     .textFieldStyle(.roundedBorder)
+                    .onChange(of: localPath) { scheduleSave() }
             }
         }
         .formStyle(.grouped)
         .padding()
+        .task { await loadSettings() }
+    }
+
+    private func loadSettings() async {
+        do {
+            let settings = try await settingsStore.read()
+            remoteHost = settings.remote?.host ?? ""
+            remotePath = settings.remote?.remotePath ?? ""
+            localPath = settings.remote?.localPath ?? ""
+        } catch {}
+    }
+
+    private func scheduleSave() {
+        saveTask?.cancel()
+        saveTask = Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            do {
+                var settings = try await settingsStore.read()
+                if remoteHost.isEmpty && remotePath.isEmpty && localPath.isEmpty {
+                    settings.remote = nil
+                } else {
+                    settings.remote = RemoteSettings(
+                        host: remoteHost,
+                        remotePath: remotePath,
+                        localPath: localPath
+                    )
+                }
+                try await settingsStore.write(settings)
+            } catch {}
+        }
     }
 }
 

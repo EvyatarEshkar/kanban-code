@@ -8,7 +8,8 @@ public protocol SessionLauncher: Sendable {
         prompt: String,
         worktreeName: String?,
         shellOverride: String?,
-        extraEnv: [String: String]
+        extraEnv: [String: String],
+        commandOverride: String?
     ) async throws -> String // returns session ID or tmux session name
 
     /// Resume an existing session by its ID.
@@ -33,7 +34,8 @@ extension SessionLauncher {
             prompt: prompt,
             worktreeName: worktreeName,
             shellOverride: shellOverride,
-            extraEnv: [:]
+            extraEnv: [:],
+            commandOverride: nil
         )
     }
 

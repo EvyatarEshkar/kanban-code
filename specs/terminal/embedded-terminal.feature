@@ -46,6 +46,32 @@ Feature: Embedded Terminal Emulator
 
   # ── Terminal without tmux ──
 
+  Scenario: No tmux session shows two action buttons
+    Given a card has no tmuxLink
+    When I open the terminal tab
+    Then it should show "No tmux session attached"
+    And two buttons should be visible:
+      | Button           | Icon          | Style            | Action                           |
+      | Resume Claude    | play.fill     | borderedProminent| Resumes claude session in tmux   |
+      | New Terminal     | terminal      | bordered         | Creates a plain shell in tmux    |
+
+  Scenario: Resume Claude from no-tmux state
+    Given a card has sessionLink (sessionId = "abc-123") but no tmuxLink
+    When I click "Resume Claude"
+    Then a new tmux session should be created immediately
+    And `claude --resume abc-123` should execute inside it
+    And the card should move to "In Progress" IMMEDIATELY (before async completes)
+    And the terminal tab should show the tmux session
+    And the tmux tab should be labeled "Claude" with brain icon
+
+  Scenario: New Terminal from no-tmux state
+    Given a card has no tmuxLink
+    When I click "New Terminal"
+    Then a new tmux session should be created with a plain shell (no claude command)
+    And the card should gain a tmuxLink immediately
+    And the terminal tab should show the new tmux session
+    And the tmux tab should be labeled "Shell" with terminal icon (not "Claude")
+
   Scenario: Session without tmux shows history
     Given a session "abc-123" has no linked tmux session
     When I open the card's detail view
@@ -87,6 +113,39 @@ Feature: Embedded Terminal Emulator
       | tmux pane check          | tmux list-panes in linked session|
     And if a process is found, warn: "A Claude process may still be running"
     And offer to kill it before resuming
+
+  # ── Terminal Tab Labels ──
+
+  Scenario: Claude session tab shows "Claude" with brain icon
+    Given a card's primary tmux session was created by launching/resuming Claude
+    And the tmuxLink has isShellOnly = false (default)
+    When I view the terminal tab bar
+    Then the primary tab should show brain icon + "Claude"
+    And extra shell sessions should show terminal icon + "sh1", "sh2", etc.
+
+  Scenario: Shell-only session tab shows "Shell" with terminal icon
+    Given a card's primary tmux session was created via "New Terminal" (plain shell)
+    And the tmuxLink has isShellOnly = true
+    When I view the terminal tab bar
+    Then the primary tab should show terminal icon + "Shell"
+    And it should NOT show brain icon or "Claude"
+
+  # ── Terminal Reattachment ──
+
+  Scenario: Terminal reattaches when drawer closes and reopens
+    Given a card has an active tmux session with terminal output
+    When I close the card detail drawer
+    And I reopen the card detail drawer
+    Then the terminal should reconnect to the same tmux session
+    And the tmux scrollback buffer should be preserved
+    Because tmux sessions persist independently of the UI
+
+  Scenario: Terminal view does not terminate tmux on close
+    Given a card's terminal is showing an active tmux session
+    When the drawer is closed (SwiftUI inspector dismissed)
+    Then the tmux CLIENT process should be terminated (the attach)
+    But the tmux SERVER session should continue running
+    And reopening should reattach with full scrollback
 
   # ── Terminal Performance ──
 

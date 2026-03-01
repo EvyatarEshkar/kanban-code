@@ -2,83 +2,145 @@ import SwiftUI
 import AppKit
 import SwiftTerm
 
-/// NSViewRepresentable wrapping SwiftTerm's LocalProcessTerminalView.
-/// Connects to a tmux session or runs a shell command.
-struct TerminalRepresentable: NSViewRepresentable {
-    let command: String
-    let arguments: [String]
-    let currentDirectory: String?
-    var onProcessExit: ((Int32) -> Void)?
+// MARK: - Terminal process cache
 
-    init(
-        command: String = "/bin/zsh",
-        arguments: [String] = [],
-        currentDirectory: String? = nil,
-        onProcessExit: ((Int32) -> Void)? = nil
-    ) {
-        self.command = command
-        self.arguments = arguments
-        self.currentDirectory = currentDirectory
-        self.onProcessExit = onProcessExit
-    }
+/// Caches tmux terminal views across drawer close/open cycles.
+/// When the drawer closes, terminals are detached from the view hierarchy but kept alive.
+/// When reopened, the cached terminal is reparented — no new tmux attach needed,
+/// preserving scrollback and terminal state.
+@MainActor
+final class TerminalCache {
+    static let shared = TerminalCache()
+    private var terminals: [String: LocalProcessTerminalView] = [:]
 
-    /// Convenience: attach to a tmux session.
-    static func tmuxAttach(sessionName: String, onExit: ((Int32) -> Void)? = nil) -> TerminalRepresentable {
-        TerminalRepresentable(
-            command: "/opt/homebrew/bin/tmux",
-            arguments: ["attach-session", "-t", sessionName],
-            onProcessExit: onExit
-        )
-    }
-
-    func makeNSView(context: Context) -> LocalProcessTerminalView {
-        let terminal = LocalProcessTerminalView(frame: .zero)
-        terminal.processDelegate = context.coordinator
+    /// Get or create a terminal for the given tmux session name.
+    func terminal(for sessionName: String, frame: NSRect) -> LocalProcessTerminalView {
+        if let existing = terminals[sessionName] {
+            return existing
+        }
+        let terminal = LocalProcessTerminalView(frame: frame)
         terminal.caretColor = .systemGreen
-
-        // Start the process
+        terminal.autoresizingMask = [.width, .height]
+        terminal.isHidden = true
         terminal.startProcess(
-            executable: command,
-            args: arguments,
+            executable: "/opt/homebrew/bin/tmux",
+            args: ["attach-session", "-t", sessionName],
             environment: nil,
             execName: nil,
-            currentDirectory: currentDirectory
+            currentDirectory: nil
         )
-
+        terminals[sessionName] = terminal
         return terminal
     }
 
-    func updateNSView(_ nsView: LocalProcessTerminalView, context: Context) {
-        // SwiftTerm handles resize automatically via NSView layout
+    /// Remove and terminate a specific terminal (e.g., when user kills a session).
+    func remove(_ sessionName: String) {
+        if let terminal = terminals.removeValue(forKey: sessionName) {
+            terminal.removeFromSuperview()
+            terminal.terminate()
+        }
     }
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onProcessExit: onProcessExit)
+    /// Check if a terminal exists for this session.
+    func has(_ sessionName: String) -> Bool {
+        terminals[sessionName] != nil
+    }
+}
+
+// MARK: - Multi-terminal container (manages all terminals for a card)
+
+/// A single NSViewRepresentable that manages multiple tmux terminal subviews.
+/// Uses TerminalCache to persist terminals across drawer close/open cycles.
+/// Terminals are created once globally and reparented as needed — never destroyed
+/// just because the drawer was toggled.
+struct TerminalContainerView: NSViewRepresentable {
+    /// All tmux session names to show tabs for.
+    let sessions: [String]
+    /// Which session is currently visible.
+    let activeSession: String
+
+    func makeNSView(context: Context) -> TerminalContainerNSView {
+        let container = TerminalContainerNSView()
+        for session in sessions {
+            container.ensureTerminal(for: session)
+        }
+        container.showTerminal(for: activeSession)
+        return container
     }
 
-    final class Coordinator: NSObject, LocalProcessTerminalViewDelegate {
-        let onProcessExit: ((Int32) -> Void)?
-
-        init(onProcessExit: ((Int32) -> Void)?) {
-            self.onProcessExit = onProcessExit
+    func updateNSView(_ nsView: TerminalContainerNSView, context: Context) {
+        // Add any new sessions (idempotent — reuses cached terminals)
+        for session in sessions {
+            nsView.ensureTerminal(for: session)
         }
+        // Remove terminals that are no longer in the list
+        nsView.removeTerminalsNotIn(Set(sessions))
+        // Switch visible terminal
+        nsView.showTerminal(for: activeSession)
+    }
 
-        func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {
-            // SwiftTerm handles PTY resize internally
+    static func dismantleNSView(_ nsView: TerminalContainerNSView, coordinator: ()) {
+        // Detach terminals from this container but do NOT terminate them.
+        // They live on in TerminalCache and will be reparented when the drawer reopens.
+        nsView.detachAll()
+    }
+}
+
+/// AppKit container that owns multiple LocalProcessTerminalView instances.
+/// Uses TerminalCache for process lifecycle — terminal processes survive view teardown.
+final class TerminalContainerNSView: NSView {
+    /// Ordered list of session names managed by this container.
+    private var managedSessions: [String] = []
+    private var activeSession: String?
+
+    /// Ensure a terminal for `sessionName` is attached to this container.
+    func ensureTerminal(for sessionName: String) {
+        guard !managedSessions.contains(sessionName) else { return }
+        let terminal = TerminalCache.shared.terminal(for: sessionName, frame: bounds)
+        // Reparent: remove from any previous superview and add to this container
+        if terminal.superview !== self {
+            terminal.removeFromSuperview()
+            addSubview(terminal)
         }
+        terminal.frame = bounds
+        terminal.isHidden = true
+        managedSessions.append(sessionName)
+    }
 
-        func processTerminated(source: TerminalView, exitCode: Int32?) {
-            if let code = exitCode {
-                onProcessExit?(code)
-            }
+    /// Show only the terminal for `sessionName`, hide all others.
+    func showTerminal(for sessionName: String) {
+        guard activeSession != sessionName else { return }
+        activeSession = sessionName
+        for name in managedSessions {
+            let terminal = TerminalCache.shared.terminal(for: name, frame: bounds)
+            terminal.isHidden = (name != sessionName)
         }
+    }
 
-        func setTerminalTitle(source: LocalProcessTerminalView, title: String) {
-            // Could update window title if needed
+    /// Remove terminals whose session names are not in `keep`.
+    /// This is called when sessions are killed — terminals are fully terminated.
+    func removeTerminalsNotIn(_ keep: Set<String>) {
+        let toRemove = managedSessions.filter { !keep.contains($0) }
+        for name in toRemove {
+            TerminalCache.shared.remove(name)
+            managedSessions.removeAll { $0 == name }
         }
+    }
 
-        func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {
-            // Could track working directory changes
+    /// Detach all terminals from this container without terminating them.
+    /// Called when the drawer closes — terminals survive in TerminalCache.
+    func detachAll() {
+        for sub in subviews {
+            sub.removeFromSuperview()
+        }
+        managedSessions.removeAll()
+        activeSession = nil
+    }
+
+    override func layout() {
+        super.layout()
+        for sub in subviews {
+            sub.frame = bounds
         }
     }
 }

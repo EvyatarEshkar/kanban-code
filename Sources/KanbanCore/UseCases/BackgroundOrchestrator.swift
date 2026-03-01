@@ -15,7 +15,8 @@ public final class BackgroundOrchestrator: @unchecked Sendable {
     private let notificationDedup: NotificationDeduplicator
     private var notifier: NotifierPort?
 
-    private var pollingTask: Task<Void, Never>?
+    private var backgroundTask: Task<Void, Never>?
+    private var didInitialLoad = false
 
     public init(
         discovery: SessionDiscovery,
@@ -37,14 +38,15 @@ public final class BackgroundOrchestrator: @unchecked Sendable {
         self.notifier = notifier
     }
 
-    /// Start the background polling loop.
+    /// Start the slow background loop (columns, PRs, activity polling).
+    /// Notifications are handled event-driven via processHookEvents().
     public func start() {
         guard !isRunning else { return }
         isRunning = true
 
-        pollingTask = Task { [weak self] in
+        backgroundTask = Task { [weak self] in
             while !Task.isCancelled {
-                await self?.tick()
+                await self?.backgroundTick()
                 try? await Task.sleep(for: .seconds(5))
             }
         }
@@ -127,69 +129,116 @@ public final class BackgroundOrchestrator: @unchecked Sendable {
         }
     }
 
-    /// Stop the background polling loop.
+    /// Stop the background loop.
     public func stop() {
-        pollingTask?.cancel()
-        pollingTask = nil
+        backgroundTask?.cancel()
+        backgroundTask = nil
         isRunning = false
     }
 
-    /// Single tick of the orchestration loop.
-    public func tick() async {
-        // 1. Process hook events
-        await processHookEvents()
+    // MARK: - Event-driven notification path (called from file watcher)
 
-        // 2. Resolve pending stops (may trigger notifications)
-        let resolvedStops = await activityDetector.resolvePendingStops()
-        for sessionId in resolvedStops {
-            await handleStopResolved(sessionId: sessionId)
-        }
-
-        // 3. Update activity states for all links
-        await updateActivityStates()
-
-        // 4. Update card columns
-        await updateColumns()
-    }
-
-    // MARK: - Private
-
-    private func processHookEvents() async {
+    /// Process new hook events and send notifications. Called directly by file watcher
+    /// for instant response — mirrors claude-pushover's hook-driven approach.
+    public func processHookEvents() async {
         do {
             let events = try await hookEventStore.readNewEvents()
+
+            if !didInitialLoad {
+                // First call: consume all old events without notifying.
+                KanbanLog.info("notify", "Initial load: consuming \(events.count) old events")
+                for event in events {
+                    await activityDetector.handleHookEvent(event)
+                }
+                let _ = await activityDetector.resolvePendingStops()
+                await notificationDedup.clearAllPending()
+                didInitialLoad = true
+                return
+            }
+
+            if !events.isEmpty {
+                KanbanLog.info("notify", "Processing \(events.count) hook events")
+            }
+
             for event in events {
                 await activityDetector.handleHookEvent(event)
 
-                // Update dedup tracker
+                // Notification logic — mirrors claude-pushover, adapted for batch processing.
+                // Uses EVENT TIMESTAMPS (not wall-clock) so batch-processed events
+                // behave identically to claude-pushover's one-event-per-process model.
                 switch event.eventName {
                 case "Stop":
-                    let _ = await notificationDedup.recordStop(sessionId: event.sessionId)
+                    // claude-pushover: sleep 1s, check if user prompted, send if not.
+                    // NO 62s dedup — Stop always sends (dedup only applies to Notification events).
+                    KanbanLog.info("notify", "Stop event for session \(event.sessionId.prefix(8)) at \(event.timestamp)")
+                    let stopTime = event.timestamp
+                    let sessionId = event.sessionId
+                    Task { [weak self] in
+                        try? await Task.sleep(for: .seconds(1))
+                        guard let self else {
+                            KanbanLog.info("notify", "Stop handler: self deallocated")
+                            return
+                        }
+                        // Check if user sent a prompt within 1s after this Stop
+                        let prompted = await notificationDedup.hasPromptedWithin(
+                            sessionId: sessionId, after: stopTime
+                        )
+                        if prompted {
+                            KanbanLog.info("notify", "Stop skipped: user prompted within 1s after stop")
+                            return
+                        }
+                        // Send directly — no dedup for Stop events (matches claude-pushover)
+                        await self.doNotify(sessionId: sessionId)
+                    }
+
                 case "Notification":
-                    // Notification hook fires when Claude needs user attention
-                    // (permission request, question, etc.) — also send push
-                    let _ = await notificationDedup.recordStop(sessionId: event.sessionId)
+                    // claude-pushover: send if not within 62s dedup window
+                    KanbanLog.info("notify", "Notification event for session \(event.sessionId.prefix(8)) at \(event.timestamp)")
+                    let sessionId = event.sessionId
+                    let eventTime = event.timestamp
+                    Task { [weak self] in
+                        // Notification events go through 62s dedup
+                        let shouldNotify = await self?.notificationDedup.shouldNotify(
+                            sessionId: sessionId, eventTime: eventTime
+                        ) ?? false
+                        guard shouldNotify else {
+                            KanbanLog.info("notify", "Notification deduped for \(sessionId.prefix(8))")
+                            return
+                        }
+                        await self?.doNotify(sessionId: sessionId)
+                    }
+
                 case "UserPromptSubmit":
-                    await notificationDedup.recordPrompt(sessionId: event.sessionId)
+                    KanbanLog.info("notify", "UserPromptSubmit for session \(event.sessionId.prefix(8)) at \(event.timestamp)")
+                    await notificationDedup.recordPrompt(sessionId: event.sessionId, at: event.timestamp)
+
                 default:
                     break
                 }
             }
         } catch {
-            // Silently continue — hook events are best-effort
+            KanbanLog.info("notify", "processHookEvents error: \(error)")
         }
     }
 
-    private func handleStopResolved(sessionId: String) async {
-        let shouldNotify = await notificationDedup.shouldNotify(sessionId: sessionId)
-        guard shouldNotify, let notifier else { return }
+    // MARK: - Private
 
-        // Get session info for notification
+    /// Send notification — no dedup check, just format and send.
+    /// Mirrors claude-pushover's do_notify() exactly.
+    private func doNotify(sessionId: String) async {
+        guard let notifier else {
+            KanbanLog.info("notify", "Notification skipped: notifier is nil")
+            return
+        }
+
         let link = try? await coordinationStore.linkForSession(sessionId)
-        let sessionNum = await notificationDedup.sessionNumber(for: sessionId)
-        let sessionName = link?.name ?? "Session #\(sessionNum)"
-        let title = "Claude #\(sessionNum): \(sessionName)"
+        let title = link?.displayTitle ?? "Session done"
 
-        // Try to get last assistant response for rich notification
+        // Mirrors claude-pushover's do_notify() exactly:
+        // 1. Get last assistant response
+        // 2. If multi-line: render image + use text preview
+        // 3. If single line: use as-is
+        // 4. No response: "Waiting for input"
         var message = "Waiting for input"
         var imageData: Data?
 
@@ -197,21 +246,27 @@ public final class BackgroundOrchestrator: @unchecked Sendable {
             if let lastText = await TranscriptNotificationReader.lastAssistantText(transcriptPath: transcriptPath) {
                 let lineCount = lastText.components(separatedBy: "\n").count
                 if lineCount > 1 {
-                    // Multi-line: render as image
                     imageData = await MarkdownImageRenderer.renderToImage(markdown: lastText)
-                    message = imageData != nil ? "Task completed" : String(lastText.prefix(500))
+                    message = TranscriptNotificationReader.textPreview(lastText)
                 } else {
-                    // Single-line: send as plain text
-                    message = String(lastText.prefix(500))
+                    message = lastText
                 }
             }
         }
 
+        KanbanLog.info("notify", "Sending notification: title=\(title), message=\(message.prefix(60))..., hasImage=\(imageData != nil)")
         try? await notifier.sendNotification(
             title: title,
             message: message,
-            imageData: imageData
+            imageData: imageData,
+            cardId: link?.id
         )
+    }
+
+    /// Slow background tick: activity states + column updates + PRs.
+    private func backgroundTick() async {
+        await updateActivityStates()
+        await updateColumns()
     }
 
     private func updateActivityStates() async {
@@ -235,8 +290,11 @@ public final class BackgroundOrchestrator: @unchecked Sendable {
 
     private func updateColumns() async {
         do {
+            // Read a snapshot of links for computing changes.
+            // We process this snapshot asynchronously, then apply changes atomically
+            // via modifyLinks() to avoid overwriting concurrent additions.
             var links = try await coordinationStore.readLinks()
-            var changed = false
+            var changedIds: Set<String> = []
 
             // Get PR data if tracker available — keyed by "repo:branch" for multi-repo
             var prsByRepoBranch: [String: PullRequest] = [:]
@@ -303,7 +361,7 @@ public final class BackgroundOrchestrator: @unchecked Sendable {
                         ))
                     }
                     // body is NOT synced here — lazy-loaded on demand via fetchPRBody
-                    changed = true
+                    changedIds.insert(links[i].id)
                 }
 
                 // Conversation branch scan for recent sessions without discoveredBranches
@@ -336,7 +394,7 @@ public final class BackgroundOrchestrator: @unchecked Sendable {
                                 }
                             }
                         }
-                        changed = true
+                        changedIds.insert(links[i].id)
                     }
                 }
 
@@ -346,10 +404,12 @@ public final class BackgroundOrchestrator: @unchecked Sendable {
                     if activityState != .stale {
                         // Hooks provided real data — let auto-assignment take over
                         links[i].manualOverrides.column = false
+                        changedIds.insert(links[i].id)
                     } else if links[i].tmuxLink != nil && !hasTmux {
                         // Had a tmux session but it's gone now
                         links[i].tmuxLink = nil
                         links[i].manualOverrides.column = false
+                        changedIds.insert(links[i].id)
                     }
                 }
 
@@ -362,12 +422,24 @@ public final class BackgroundOrchestrator: @unchecked Sendable {
                 )
 
                 if links[i].column != oldColumn {
-                    changed = true
+                    changedIds.insert(links[i].id)
                 }
             }
 
-            if changed {
-                try await coordinationStore.writeLinks(links)
+            // Apply changes atomically — re-reads fresh data so we don't overwrite
+            // concurrent additions (e.g. manual tasks created between our read and write)
+            if !changedIds.isEmpty {
+                let updatedById = Dictionary(
+                    links.filter { changedIds.contains($0.id) }.map { ($0.id, $0) },
+                    uniquingKeysWith: { a, _ in a }
+                )
+                try await coordinationStore.modifyLinks { freshLinks in
+                    for i in freshLinks.indices {
+                        if let updated = updatedById[freshLinks[i].id] {
+                            freshLinks[i] = updated
+                        }
+                    }
+                }
             }
         } catch {
             // Continue on error

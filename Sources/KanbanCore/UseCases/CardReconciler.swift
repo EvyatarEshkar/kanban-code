@@ -18,17 +18,20 @@ public enum CardReconciler {
     public struct DiscoverySnapshot: Sendable {
         public let sessions: [Session]
         public let tmuxSessions: [TmuxSession]
+        public let didScanTmux: Bool                    // true if tmux was queried (even if 0 results)
         public let worktrees: [String: [Worktree]]     // repoRoot → worktrees
         public let pullRequests: [String: PullRequest]  // branch → PR
 
         public init(
             sessions: [Session] = [],
             tmuxSessions: [TmuxSession] = [],
+            didScanTmux: Bool = false,
             worktrees: [String: [Worktree]] = [:],
             pullRequests: [String: PullRequest] = [:]
         ) {
             self.sessions = sessions
             self.tmuxSessions = tmuxSessions
+            self.didScanTmux = didScanTmux
             self.worktrees = worktrees
             self.pullRequests = pullRequests
         }
@@ -77,7 +80,7 @@ public enum CardReconciler {
             if let cardId, var link = linksById[cardId] {
                 // Update existing card with session data
                 if link.sessionLink == nil {
-                    // First time linking session to this card
+                    KanbanLog.info("reconciler", "Linking session \(session.id.prefix(8)) to existing card \(cardId.prefix(12))")
                     link.sessionLink = SessionLink(
                         sessionId: session.id,
                         sessionPath: session.jsonlPath
@@ -94,6 +97,7 @@ public enum CardReconciler {
                 linksById[cardId] = link
                 matchedSessionIds.insert(session.id)
             } else {
+                KanbanLog.info("reconciler", "New session \(session.id.prefix(8)) → new card")
                 // Truly new session — create discovered card
                 let newLink = Link(
                     projectPath: session.projectPath,
@@ -127,7 +131,7 @@ public enum CardReconciler {
 
         // B. Match worktrees to existing cards
         let liveTmuxNames = Set(snapshot.tmuxSessions.map(\.name))
-        let didScanTmux = !snapshot.tmuxSessions.isEmpty
+        let didScanTmux = snapshot.didScanTmux
         var liveWorktreePaths: Set<String> = []
         let didScanWorktrees = !snapshot.worktrees.isEmpty
 
@@ -144,6 +148,7 @@ public enum CardReconciler {
                 let existingCardIds = cardIdsByBranch[baseName] ?? []
                 if existingCardIds.isEmpty {
                     // Orphan worktree — create a new card
+                    KanbanLog.info("reconciler", "Orphan worktree branch=\(baseName) → new card")
                     let newLink = Link(
                         projectPath: repoRoot,
                         source: .discovered,
@@ -158,7 +163,7 @@ public enum CardReconciler {
                             if link.worktreeLink != nil {
                                 link.worktreeLink?.path = worktree.path
                             } else {
-                                // Card matched by session gitBranch — set worktreeLink
+                                KanbanLog.info("reconciler", "Setting worktreeLink on card \(cardId.prefix(12)) for branch=\(baseName)")
                                 link.worktreeLink = WorktreeLink(path: worktree.path, branch: baseName)
                             }
                             linksById[cardId] = link
@@ -168,12 +173,21 @@ public enum CardReconciler {
             }
         }
 
-        // C. Match PRs to existing cards via branch
+        // C. Match PRs to existing cards via branch (add or update)
         for (branch, pr) in snapshot.pullRequests {
             let cardIds = cardIdsByBranch[branch] ?? []
+            if cardIds.isEmpty {
+                KanbanLog.info("reconciler", "PR #\(pr.number) on branch=\(branch) has no matching card")
+            }
             for cardId in cardIds {
                 if var link = linksById[cardId] {
-                    if !link.prLinks.contains(where: { $0.number == pr.number }) {
+                    if let idx = link.prLinks.firstIndex(where: { $0.number == pr.number }) {
+                        KanbanLog.info("reconciler", "Updating PR #\(pr.number) on card \(cardId.prefix(12)): status=\(pr.status)")
+                        link.prLinks[idx].status = pr.status
+                        link.prLinks[idx].url = pr.url
+                        link.prLinks[idx].title = pr.title
+                    } else {
+                        KanbanLog.info("reconciler", "Adding PR #\(pr.number) to card \(cardId.prefix(12)): status=\(pr.status)")
                         link.prLinks.append(PRLink(number: pr.number, url: pr.url, status: pr.status, title: pr.title))
                     }
                     linksById[cardId] = link
@@ -238,6 +252,7 @@ public enum CardReconciler {
     ) -> String? {
         // 1. Exact match by sessionId
         if let cardId = cardIdBySessionId[session.id] {
+            KanbanLog.info("reconciler", "findCard: session=\(session.id.prefix(8)) matched by sessionId → card=\(cardId.prefix(12))")
             return cardId
         }
 
@@ -247,9 +262,14 @@ public enum CardReconciler {
             if let cardIds = cardIdsByBranch[baseName] {
                 // Prefer cards that don't already have a session (pending cards)
                 let pendingCards = cardIds.filter { linksById[$0]?.sessionLink == nil }
-                if let cardId = pendingCards.first { return cardId }
-                // Otherwise use the first match
-                if let cardId = cardIds.first { return cardId }
+                if let cardId = pendingCards.first {
+                    KanbanLog.info("reconciler", "findCard: session=\(session.id.prefix(8)) matched by branch=\(baseName) → card=\(cardId.prefix(12))")
+                    return cardId
+                }
+                if let cardId = cardIds.first {
+                    KanbanLog.info("reconciler", "findCard: session=\(session.id.prefix(8)) matched by branch=\(baseName) (existing) → card=\(cardId.prefix(12))")
+                    return cardId
+                }
             }
         }
 
@@ -259,11 +279,20 @@ public enum CardReconciler {
                 if link.tmuxLink != nil,
                    link.sessionLink == nil,
                    link.projectPath == projectPath {
+                    KanbanLog.info("reconciler", "findCard: session=\(session.id.prefix(8)) matched by projectPath+tmux → card=\(link.id.prefix(12)) (tmux=\(link.tmuxLink?.sessionName ?? "?"))")
                     return link.id
+                }
+            }
+            // Log when no match found for debugging
+            let tmuxCards = linksById.values.filter { $0.tmuxLink != nil && $0.sessionLink == nil }
+            if !tmuxCards.isEmpty {
+                for card in tmuxCards {
+                    KanbanLog.info("reconciler", "findCard: session=\(session.id.prefix(8)) projectPath=\(projectPath) — tmux card=\(card.id.prefix(12)) has projectPath=\(card.projectPath ?? "nil") (no match)")
                 }
             }
         }
 
+        KanbanLog.info("reconciler", "findCard: session=\(session.id.prefix(8)) projectPath=\(session.projectPath ?? "nil") → NO MATCH")
         return nil
     }
 }

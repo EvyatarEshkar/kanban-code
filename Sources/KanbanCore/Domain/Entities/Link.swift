@@ -17,8 +17,9 @@ public struct SessionLink: Codable, Sendable, Equatable {
 
 /// Link to a tmux terminal session.
 public struct TmuxLink: Codable, Sendable, Equatable {
-    public var sessionName: String          // Primary Claude session
+    public var sessionName: String          // Primary tmux session
     public var extraSessions: [String]?     // User-created shell terminals
+    public var isShellOnly: Bool?           // true if primary session is a plain shell (not Claude)
 
     /// All session names (primary + extras).
     public var allSessionNames: [String] {
@@ -30,9 +31,10 @@ public struct TmuxLink: Codable, Sendable, Equatable {
     /// Total count of terminals.
     public var terminalCount: Int { allSessionNames.count }
 
-    public init(sessionName: String, extraSessions: [String]? = nil) {
+    public init(sessionName: String, extraSessions: [String]? = nil, isShellOnly: Bool = false) {
         self.sessionName = sessionName
         self.extraSessions = extraSessions
+        self.isShellOnly = isShellOnly ? true : nil // nil when false for compact JSON
     }
 }
 
@@ -141,6 +143,18 @@ public struct Link: Identifiable, Codable, Sendable {
 
     /// Whether this card's project is configured for remote execution.
     public var isRemote: Bool
+
+    // MARK: - Display
+
+    /// Best display title from link data alone: name → promptBody → branch → PR title → session ID.
+    public var displayTitle: String {
+        if let name, !name.isEmpty { return name }
+        if let promptBody, !promptBody.isEmpty { return String(promptBody.prefix(100)) }
+        if let branch = worktreeLink?.branch, !branch.isEmpty { return branch }
+        if let prTitle = prLink?.title, !prTitle.isEmpty { return prTitle }
+        if let sid = sessionLink?.sessionId { return String(sid.prefix(8)) + "..." }
+        return String(id.prefix(8)) + "..."
+    }
 
     // MARK: - Multi-PR computed properties
 

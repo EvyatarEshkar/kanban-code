@@ -1,7 +1,7 @@
 import SwiftUI
 import KanbanCore
 
-/// Pre-launch confirmation dialog showing editable prompt, options, and command preview.
+/// Pre-launch confirmation dialog showing editable prompt, options, and editable command.
 struct LaunchConfirmationDialog: View {
     let cardId: String
     let projectPath: String
@@ -12,11 +12,39 @@ struct LaunchConfirmationDialog: View {
     let hasRemoteConfig: Bool
     let remoteHost: String?
     @Binding var isPresented: Bool
-    var onLaunch: (String, Bool, Bool) -> Void = { _, _, _ in } // (editedPrompt, createWorktree, runRemotely)
+    var onLaunch: (String, Bool, Bool, String?) -> Void = { _, _, _, _ in } // (editedPrompt, createWorktree, runRemotely, commandOverride)
 
-    @State private var prompt: String = ""
+    @State private var prompt: String
+    @State private var command: String = ""
+    @State private var commandEdited: Bool = false
     @AppStorage("createWorktree") private var createWorktree = true
     @AppStorage("runRemotely") private var runRemotely = true
+
+    init(
+        cardId: String,
+        projectPath: String,
+        initialPrompt: String,
+        worktreeName: String? = nil,
+        hasExistingWorktree: Bool = false,
+        isGitRepo: Bool = false,
+        hasRemoteConfig: Bool = false,
+        remoteHost: String? = nil,
+        isPresented: Binding<Bool>,
+        onLaunch: @escaping (String, Bool, Bool, String?) -> Void = { _, _, _, _ in }
+    ) {
+        self.cardId = cardId
+        self.projectPath = projectPath
+        self.initialPrompt = initialPrompt
+        self.worktreeName = worktreeName
+        self.hasExistingWorktree = hasExistingWorktree
+        self.isGitRepo = isGitRepo
+        self.hasRemoteConfig = hasRemoteConfig
+        self.remoteHost = remoteHost
+        self._isPresented = isPresented
+        self.onLaunch = onLaunch
+        // Initialize prompt state directly — avoids .onAppear timing issues
+        self._prompt = State(initialValue: initialPrompt)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -52,12 +80,13 @@ struct LaunchConfirmationDialog: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                TextEditor(text: $prompt)
-                    .font(.body.monospaced())
-                    .frame(minHeight: 120, maxHeight: 300)
-                    .scrollContentBackground(.hidden)
-                    .padding(8)
-                    .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+                PromptEditor(
+                    text: $prompt,
+                    onSubmit: submitForm
+                )
+                .frame(minHeight: 120, maxHeight: 300)
+                .padding(4)
+                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
             }
 
             // Checkboxes
@@ -85,19 +114,20 @@ struct LaunchConfirmationDialog: View {
                 }
             }
 
-            // Command preview
+            // Editable command
             VStack(alignment: .leading, spacing: 4) {
                 Text("Command")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text(commandPreview)
+                TextField("", text: $command)
                     .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
-                    .truncationMode(.tail)
-                    .padding(8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 6))
+                    .textFieldStyle(.roundedBorder)
+                    .onChange(of: command) {
+                        // Track if user manually edited the command
+                        if command != commandPreview {
+                            commandEdited = true
+                        }
+                    }
             }
 
             // Buttons
@@ -108,10 +138,7 @@ struct LaunchConfirmationDialog: View {
                 }
                 .keyboardShortcut(.cancelAction)
 
-                Button("Launch") {
-                    onLaunch(prompt, effectiveCreateWorktree, effectiveRunRemotely)
-                    isPresented = false
-                }
+                Button("Launch", action: submitForm)
                 .keyboardShortcut(.defaultAction)
                 .disabled(prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .buttonStyle(.borderedProminent)
@@ -120,8 +147,20 @@ struct LaunchConfirmationDialog: View {
         .padding(20)
         .frame(width: 500)
         .onAppear {
-            prompt = initialPrompt
+            command = commandPreview
         }
+        .onChange(of: prompt) {
+            if !commandEdited { command = commandPreview }
+        }
+    }
+
+    // MARK: - Actions
+
+    private func submitForm() {
+        guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let override = commandEdited ? command : nil
+        onLaunch(prompt, effectiveCreateWorktree, effectiveRunRemotely, override)
+        isPresented = false
     }
 
     // MARK: - Computed

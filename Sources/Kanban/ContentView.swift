@@ -2,6 +2,20 @@ import SwiftUI
 import AppKit
 import KanbanCore
 
+/// Bundles all parameters for the launch confirmation dialog.
+/// Used with `.sheet(item:)` to guarantee all values are captured atomically.
+struct LaunchConfig: Identifiable {
+    let id = UUID()
+    let cardId: String
+    let projectPath: String
+    let prompt: String
+    let worktreeName: String?
+    let hasExistingWorktree: Bool
+    let isGitRepo: Bool
+    let hasRemoteConfig: Bool
+    let remoteHost: String?
+}
+
 struct ContentView: View {
     @State private var boardState: BoardState
     @State private var orchestrator: BackgroundOrchestrator
@@ -11,15 +25,7 @@ struct ContentView: View {
     @AppStorage("appearanceMode") private var appearanceMode: AppearanceMode = .auto
     @State private var showAddFromPath = false
     @State private var addFromPathText = ""
-    @State private var showLaunchConfirmation = false
-    @State private var launchCardId: String?
-    @State private var launchPrompt: String = ""
-    @State private var launchProjectPath: String = ""
-    @State private var launchWorktreeName: String?
-    @State private var launchHasExistingWorktree = false
-    @State private var launchIsGitRepo = false
-    @State private var launchHasRemoteConfig = false
-    @State private var launchRemoteHost: String?
+    @State private var launchConfig: LaunchConfig?
     @State private var syncStatuses: [String: SyncStatus] = [:]
     @State private var isSyncRefreshing = false
     @AppStorage("selectedProject") private var selectedProjectPersisted: String = ""
@@ -116,6 +122,8 @@ struct ContentView: View {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(cmd, forType: .string)
             },
+            onCleanupWorktree: { cardId in Task { await cleanupWorktree(cardId: cardId) } },
+            onDeleteCard: { cardId in deleteCardWithCleanup(cardId: cardId) },
             onRefreshBacklog: { Task { await boardState.refreshBacklog() } },
             onNewTask: { showNewTask = true }
         )
@@ -200,30 +208,31 @@ struct ContentView: View {
                     onCreate: { prompt, projectPath, title, startImmediately in
                         createManualTask(prompt: prompt, projectPath: projectPath, title: title, startImmediately: startImmediately)
                     },
-                    onCreateAndLaunch: { prompt, projectPath, title, createWorktree, runRemotely in
-                        createManualTaskAndLaunch(prompt: prompt, projectPath: projectPath, title: title, createWorktree: createWorktree, runRemotely: runRemotely)
+                    onCreateAndLaunch: { prompt, projectPath, title, createWorktree, runRemotely, commandOverride in
+                        createManualTaskAndLaunch(prompt: prompt, projectPath: projectPath, title: title, createWorktree: createWorktree, runRemotely: runRemotely, commandOverride: commandOverride)
                     }
                 )
             }
             .sheet(isPresented: $showAddFromPath) {
                 addFromPathSheet
             }
-            .sheet(isPresented: $showLaunchConfirmation) {
+            .sheet(item: $launchConfig) { config in
                 LaunchConfirmationDialog(
-                    cardId: launchCardId ?? "",
-                    projectPath: launchProjectPath,
-                    initialPrompt: launchPrompt,
-                    worktreeName: launchWorktreeName,
-                    hasExistingWorktree: launchHasExistingWorktree,
-                    isGitRepo: launchIsGitRepo,
-                    hasRemoteConfig: launchHasRemoteConfig,
-                    remoteHost: launchRemoteHost,
-                    isPresented: $showLaunchConfirmation
-                ) { editedPrompt, createWorktree, runRemotely in
-                    if let cardId = launchCardId {
-                        let wtName: String? = createWorktree ? (launchWorktreeName ?? "") : nil
-                        executeLaunch(cardId: cardId, prompt: editedPrompt, projectPath: launchProjectPath, worktreeName: wtName, runRemotely: runRemotely)
-                    }
+                    cardId: config.cardId,
+                    projectPath: config.projectPath,
+                    initialPrompt: config.prompt,
+                    worktreeName: config.worktreeName,
+                    hasExistingWorktree: config.hasExistingWorktree,
+                    isGitRepo: config.isGitRepo,
+                    hasRemoteConfig: config.hasRemoteConfig,
+                    remoteHost: config.remoteHost,
+                    isPresented: Binding(
+                        get: { launchConfig != nil },
+                        set: { if !$0 { launchConfig = nil } }
+                    )
+                ) { editedPrompt, createWorktree, runRemotely, commandOverride in
+                    let wtName: String? = createWorktree ? (config.worktreeName ?? "") : nil
+                    executeLaunch(cardId: config.cardId, prompt: editedPrompt, projectPath: config.projectPath, worktreeName: wtName, runRemotely: runRemotely, commandOverride: commandOverride)
                 }
             }
             .sheet(isPresented: $showOnboarding) {
@@ -237,6 +246,27 @@ struct ContentView: View {
                         orchestrator.updateNotifier(newNotifier)
                     }
                 )
+            }
+            .alert(
+                "Remote Worktree",
+                isPresented: Binding(
+                    get: { pendingWorktreeCleanup != nil },
+                    set: { if !$0 { pendingWorktreeCleanup = nil } }
+                )
+            ) {
+                Button("Cleanup Local Copy", role: .destructive) {
+                    if let info = pendingWorktreeCleanup {
+                        Task { await executeLocalWorktreeCleanup(info) }
+                    }
+                    pendingWorktreeCleanup = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    pendingWorktreeCleanup = nil
+                }
+            } message: {
+                if let info = pendingWorktreeCleanup {
+                    Text("The worktree path is on a remote machine:\n\n\(info.remotePath)\n\nThis will SSH to the remote to run git worktree remove, then delete the local synced copy at:\n\n\(info.localPath)")
+                }
             }
             .task {
                 // Show onboarding wizard on first launch
@@ -288,9 +318,14 @@ struct ContentView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .kanbanHookEvent)) { _ in
                 Task {
-                    await orchestrator.tick()
+                    await orchestrator.processHookEvents()
                     await boardState.refresh()
                     systemTray.update()
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .kanbanSelectCard)) { notification in
+                if let cardId = notification.userInfo?["cardId"] as? String {
+                    boardState.selectedCardId = cardId
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .kanbanSettingsChanged)) { _ in
@@ -446,9 +481,12 @@ struct ContentView: View {
         }
 
         // for-await runs on @MainActor, so posting notifications is safe
+        KanbanLog.info("watcher", "File watcher started for hook-events.jsonl")
         for await _ in events {
+            KanbanLog.info("watcher", "hook-events.jsonl changed")
             NotificationCenter.default.post(name: .kanbanHookEvent, object: nil)
         }
+        KanbanLog.info("watcher", "File watcher loop exited (cancelled?)")
 
         close(fd)
     }
@@ -798,18 +836,21 @@ struct ContentView: View {
             source: .manual,
             promptBody: trimmed
         )
-        let linkId = link.id
-        Task {
-            try? await coordinationStore.upsertLink(link)
-            await boardState.refresh()
-            if startImmediately {
-                startCard(cardId: linkId)
-            }
+
+        // Immediately add to board (synchronous — user sees card instantly)
+        boardState.addCard(link: link)
+        KanbanLog.info("manual-task", "Created manual task card=\(link.id.prefix(12)) name='\(name)' project=\(projectPath ?? "nil") startImmediately=\(startImmediately)")
+
+        // Persist in background (won't be overwritten thanks to atomic modifyLinks)
+        Task { try? await coordinationStore.upsertLink(link) }
+
+        if startImmediately {
+            startCard(cardId: link.id)
         }
     }
 
     /// Create a manual task and launch it directly, bypassing the LaunchConfirmationDialog.
-    private func createManualTaskAndLaunch(prompt: String, projectPath: String?, title: String? = nil, createWorktree: Bool, runRemotely: Bool) {
+    private func createManualTaskAndLaunch(prompt: String, projectPath: String?, title: String? = nil, createWorktree: Bool, runRemotely: Bool, commandOverride: String? = nil) {
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let name: String
         if let title, !title.isEmpty {
@@ -825,20 +866,23 @@ struct ContentView: View {
             source: .manual,
             promptBody: trimmed
         )
-        let linkId = link.id
         let effectivePath = projectPath ?? NSHomeDirectory()
-        Task {
-            try? await coordinationStore.upsertLink(link)
-            await boardState.refresh()
 
-            // Build prompt using PromptBuilder
+        // Immediately add to board (synchronous)
+        boardState.addCard(link: link)
+        KanbanLog.info("manual-task", "Created & launching task card=\(link.id.prefix(12)) name='\(name)' project=\(effectivePath)")
+
+        // Persist in background
+        Task { try? await coordinationStore.upsertLink(link) }
+
+        // Build prompt and launch
+        Task {
             let settings = try? await settingsStore.read()
             let project = settings?.projects.first(where: { $0.path == effectivePath })
-            guard let card = boardState.cards.first(where: { $0.id == linkId }) else { return }
-            let builtPrompt = PromptBuilder.buildPrompt(card: card.link, project: project, settings: settings)
+            let builtPrompt = PromptBuilder.buildPrompt(card: link, project: project, settings: settings)
 
             let wtName: String? = createWorktree ? "" : nil
-            executeLaunch(cardId: linkId, prompt: builtPrompt, projectPath: effectivePath, worktreeName: wtName, runRemotely: runRemotely)
+            executeLaunch(cardId: link.id, prompt: builtPrompt, projectPath: effectivePath, worktreeName: wtName, runRemotely: runRemotely, commandOverride: commandOverride)
         }
     }
 
@@ -880,30 +924,37 @@ struct ContentView: View {
                 atPath: (effectivePath as NSString).appendingPathComponent(".git")
             )
 
-            // Show launch confirmation dialog
-            launchCardId = cardId
-            launchPrompt = prompt
-            launchProjectPath = effectivePath
-            launchWorktreeName = worktreeName
-            launchHasExistingWorktree = card.link.worktreeLink != nil
-            launchIsGitRepo = isGitRepo
-            launchHasRemoteConfig = project?.remoteConfig != nil
-            launchRemoteHost = project?.remoteConfig?.host
-            showLaunchConfirmation = true
+            // Show launch confirmation dialog with all params bundled atomically
+            launchConfig = LaunchConfig(
+                cardId: cardId,
+                projectPath: effectivePath,
+                prompt: prompt,
+                worktreeName: worktreeName,
+                hasExistingWorktree: card.link.worktreeLink != nil,
+                isGitRepo: isGitRepo,
+                hasRemoteConfig: project?.remoteConfig != nil,
+                remoteHost: project?.remoteConfig?.host
+            )
         }
     }
 
-    private func executeLaunch(cardId: String, prompt: String, projectPath: String, worktreeName: String?, runRemotely: Bool = true) {
+    private func executeLaunch(cardId: String, prompt: String, projectPath: String, worktreeName: String?, runRemotely: Bool = true, commandOverride: String? = nil) {
+        // IMMEDIATE feedback: update in-memory card with tmuxLink + column + open drawer
+        // This is synchronous — user sees the card move to In Progress and drawer opens on Terminal tab.
+        // NOTE: We do NOT call setCardColumn() which fires a racy async upsertLink.
+        let predictedTmuxName = LaunchSession.tmuxSessionName(project: projectPath, worktree: worktreeName)
+        boardState.updateCardForLaunch(cardId: cardId, tmuxName: predictedTmuxName)
+        boardState.selectedCardId = cardId
+        KanbanLog.info("launch", "Starting launch for card=\(cardId.prefix(12)) tmux=\(predictedTmuxName) project=\(projectPath)")
+
         Task {
             do {
-                // Pre-set tmuxLink BEFORE launching to prevent duplicate card creation.
-                // The reconciler matches discovered sessions to cards via tmuxLink + projectPath,
-                // so this must be set before any background refresh can race.
-                let predictedTmuxName = LaunchSession.tmuxSessionName(project: projectPath, worktree: worktreeName)
+                // Persist tmuxLink + column to disk BEFORE launching
                 try? await coordinationStore.updateLink(id: cardId) { @Sendable link in
                     link.tmuxLink = TmuxLink(sessionName: predictedTmuxName)
                     link.column = .inProgress
                 }
+                KanbanLog.info("launch", "Persisted tmuxLink for card=\(cardId.prefix(12))")
 
                 // Resolve remote config from project settings
                 let settings = try? await settingsStore.read()
@@ -914,13 +965,11 @@ struct ContentView: View {
                 let isRemote: Bool
 
                 if runRemotely, let project, project.remoteConfig != nil {
-                    // Deploy remote shell script and get override path
                     try? RemoteShellManager.deploy()
                     shellOverride = RemoteShellManager.shellOverridePath(for: project)
                     extraEnv = RemoteShellManager.setupEnvironment(for: project)
                     isRemote = true
 
-                    // Start Mutagen sync before launching
                     if let remote = project.remoteConfig {
                         let syncName = "kanban-\((project.path as NSString).lastPathComponent)"
                         let remoteDest = "\(remote.host):\(remote.remotePath)"
@@ -944,16 +993,19 @@ struct ContentView: View {
                     ((try? FileManager.default.contentsOfDirectory(atPath: sessionDir)) ?? [])
                         .filter { $0.hasSuffix(".jsonl") }
                 )
+                KanbanLog.info("launch", "Launching tmux session tmux=\(predictedTmuxName)")
 
                 let tmuxName = try await launcher.launch(
                     projectPath: projectPath,
                     prompt: prompt,
                     worktreeName: worktreeName,
                     shellOverride: shellOverride,
-                    extraEnv: extraEnv
+                    extraEnv: extraEnv,
+                    commandOverride: commandOverride
                 )
+                KanbanLog.info("launch", "Tmux session created: \(tmuxName)")
 
-                // Update with actual name (should match predicted) + remote flag
+                // Update with actual name + remote flag
                 let remoteFlag = isRemote
                 try? await coordinationStore.updateLink(id: cardId) { @Sendable link in
                     link.tmuxLink = TmuxLink(sessionName: tmuxName)
@@ -962,7 +1014,8 @@ struct ContentView: View {
                 }
 
                 // Detect new Claude session by polling for new .jsonl file (up to 3 seconds)
-                for _ in 0..<6 {
+                var foundSession = false
+                for attempt in 0..<6 {
                     try? await Task.sleep(for: .milliseconds(500))
                     let currentFiles = Set(
                         ((try? FileManager.default.contentsOfDirectory(atPath: sessionDir)) ?? [])
@@ -971,23 +1024,40 @@ struct ContentView: View {
                     if let newFile = currentFiles.subtracting(existingFiles).first {
                         let sessionId = (newFile as NSString).deletingPathExtension
                         let sessionPath = (sessionDir as NSString).appendingPathComponent(newFile)
+                        KanbanLog.info("launch", "Detected session file after \(attempt+1) attempts: \(sessionId.prefix(8))")
                         try? await coordinationStore.updateLink(id: cardId) { @Sendable link in
                             link.sessionLink = SessionLink(sessionId: sessionId, sessionPath: sessionPath)
                         }
+                        foundSession = true
                         break
                     }
                 }
+                if !foundSession {
+                    KanbanLog.warn("launch", "Session file not detected after 3s for card=\(cardId.prefix(12))")
+                }
 
-                boardState.setCardColumn(cardId: cardId, to: .inProgress)
+                KanbanLog.info("launch", "Refreshing board after launch for card=\(cardId.prefix(12))")
                 await boardState.refresh()
             } catch {
-                // Clear tmuxLink on failure
+                KanbanLog.error("launch", "Launch failed for card=\(cardId.prefix(12)): \(error.localizedDescription)")
+                // Revert: clear tmuxLink on failure
                 try? await coordinationStore.updateLink(id: cardId) { @Sendable link in
                     link.tmuxLink = nil
                 }
                 boardState.error = "Launch failed: \(error.localizedDescription)"
+                await boardState.refresh()
             }
         }
+    }
+
+    @State private var pendingWorktreeCleanup: WorktreeCleanupInfo?
+
+    struct WorktreeCleanupInfo: Identifiable {
+        let id = UUID()
+        let cardId: String
+        let remotePath: String
+        let localPath: String
+        let errorMessage: String
     }
 
     private func cleanupWorktree(cardId: String) async {
@@ -998,21 +1068,104 @@ struct ContentView: View {
         let adapter = GitWorktreeAdapter()
         do {
             try await adapter.removeWorktree(path: worktreePath, force: false)
-            // Clear worktree link from card
             try? await coordinationStore.updateLink(id: cardId) { @Sendable link in
                 link.worktreeLink = nil
             }
             await boardState.refresh()
         } catch {
-            boardState.error = "Worktree cleanup failed: \(error.localizedDescription)"
+            // Check if this is a remote worktree path we can translate
+            if let localPath = translateRemoteWorktreePath(worktreePath, projectPath: card.link.projectPath) {
+                pendingWorktreeCleanup = WorktreeCleanupInfo(
+                    cardId: cardId,
+                    remotePath: worktreePath,
+                    localPath: localPath,
+                    errorMessage: error.localizedDescription
+                )
+            } else {
+                boardState.setError("Worktree cleanup failed: \(error.localizedDescription)")
+            }
         }
+    }
+
+    /// Translate a remote worktree path to a local one using remote config.
+    /// Checks per-project remote config first, then falls back to global settings.remote.
+    private func translateRemoteWorktreePath(_ worktreePath: String, projectPath: String?) -> String? {
+        // Try per-project remote config first
+        var remote: RemoteSettings?
+        if let projectPath {
+            let project = boardState.configuredProjects.first(where: {
+                $0.path == projectPath || $0.effectiveRepoRoot == projectPath
+            })
+            remote = project?.remoteConfig
+        }
+        // Fall back to global remote config
+        if remote == nil {
+            remote = (try? settingsStore.read())?.remote
+        }
+        guard let remote else { return nil }
+        guard worktreePath.hasPrefix(remote.remotePath) else { return nil }
+        let suffix = String(worktreePath.dropFirst(remote.remotePath.count))
+        return remote.localPath + suffix
+    }
+
+    private func executeLocalWorktreeCleanup(_ info: WorktreeCleanupInfo) async {
+        // For remote worktrees synced locally via mutagen:
+        // 1. SSH to remote and run proper git worktree remove
+        // 2. Delete the local synced directory
+
+        let remote = try? await settingsStore.read().remote
+
+        // Step 1: SSH to remote for proper git worktree removal
+        if let remote {
+            // Derive repo root from worktree path (before .claude/worktrees/)
+            let repoRoot: String
+            if let range = info.remotePath.range(of: "/.claude/worktrees/") {
+                repoRoot = String(info.remotePath[..<range.lowerBound])
+            } else {
+                repoRoot = (info.remotePath as NSString).deletingLastPathComponent
+            }
+
+            do {
+                let sshCmd = "cd '\(repoRoot)' && git worktree remove --force '\(info.remotePath)'"
+                let result = try await ShellCommand.run("/usr/bin/ssh", arguments: [remote.host, sshCmd])
+                if !result.succeeded {
+                    KanbanLog.warn("cleanup", "Remote git worktree remove failed: \(result.stderr)")
+                } else {
+                    KanbanLog.info("cleanup", "Remote worktree removed: \(info.remotePath)")
+                }
+            } catch {
+                KanbanLog.warn("cleanup", "SSH cleanup failed: \(error)")
+            }
+        }
+
+        // Step 2: Remove local synced copy
+        let fm = FileManager.default
+        if fm.fileExists(atPath: info.localPath) {
+            do {
+                try fm.removeItem(atPath: info.localPath)
+                KanbanLog.info("cleanup", "Removed local copy: \(info.localPath)")
+            } catch {
+                boardState.setError("Failed to remove local copy: \(error.localizedDescription)")
+                return
+            }
+        }
+
+        // Step 3: Remove card if it has no session, otherwise just clear worktree link
+        let card = boardState.cards.first(where: { $0.id == info.cardId })
+        if card?.link.sessionLink == nil {
+            try? await coordinationStore.removeLink(id: info.cardId)
+        } else {
+            try? await coordinationStore.updateLink(id: info.cardId) { @Sendable link in
+                link.worktreeLink = nil
+            }
+        }
+        await boardState.refresh()
     }
 
     // MARK: - Extra Terminals
 
     private func createExtraTerminal(cardId: String) {
-        guard let card = boardState.cards.first(where: { $0.id == cardId }),
-              let tmux = card.link.tmuxLink else { return }
+        guard let card = boardState.cards.first(where: { $0.id == cardId }) else { return }
 
         // Working directory: worktree > projectPath > home
         let workDir: String
@@ -1022,26 +1175,55 @@ struct ContentView: View {
             workDir = card.link.projectPath ?? NSHomeDirectory()
         }
 
-        // Next available shell number
-        let existing = tmux.extraSessions ?? []
-        let baseName = tmux.sessionName
-        var n = 1
-        while existing.contains("\(baseName)-sh\(n)") { n += 1 }
-        let newName = "\(baseName)-sh\(n)"
+        if let tmux = card.link.tmuxLink {
+            // Has existing tmux — add an extra shell session
+            let existing = tmux.extraSessions ?? []
+            let baseName = tmux.sessionName
+            var n = 1
+            while existing.contains("\(baseName)-sh\(n)") { n += 1 }
+            let newName = "\(baseName)-sh\(n)"
 
-        Task {
-            do {
-                let tmuxAdapter = TmuxAdapter()
-                try await tmuxAdapter.createSession(name: newName, path: workDir, command: nil)
+            Task {
+                do {
+                    let tmuxAdapter = TmuxAdapter()
+                    try await tmuxAdapter.createSession(name: newName, path: workDir, command: nil)
 
-                try? await coordinationStore.updateLink(id: cardId) { @Sendable link in
-                    var sessions = link.tmuxLink?.extraSessions ?? []
-                    sessions.append(newName)
-                    link.tmuxLink?.extraSessions = sessions
+                    try? await coordinationStore.updateLink(id: cardId) { @Sendable link in
+                        var sessions = link.tmuxLink?.extraSessions ?? []
+                        sessions.append(newName)
+                        link.tmuxLink?.extraSessions = sessions
+                    }
+                    await boardState.refresh()
+                } catch {
+                    boardState.setError("Failed to create terminal: \(error.localizedDescription)")
                 }
-                await boardState.refresh()
-            } catch {
-                boardState.error = "Failed to create terminal: \(error.localizedDescription)"
+            }
+        } else {
+            // No tmux at all — create a primary terminal session (plain shell, no Claude)
+            let projectPath = card.link.projectPath ?? NSHomeDirectory()
+            let tmuxName = LaunchSession.tmuxSessionName(project: projectPath, worktree: card.link.worktreeLink?.branch)
+            KanbanLog.info("terminal", "Creating standalone shell terminal for card=\(cardId.prefix(12)) tmux=\(tmuxName)")
+
+            // Immediate UI feedback — mark as shell-only so tab shows "Shell" not "Claude"
+            boardState.updateCardForLaunch(cardId: cardId, tmuxName: tmuxName, isShellOnly: true)
+
+            Task {
+                do {
+                    let tmuxAdapter = TmuxAdapter()
+                    try await tmuxAdapter.createSession(name: tmuxName, path: workDir, command: nil)
+
+                    try? await coordinationStore.updateLink(id: cardId) { @Sendable link in
+                        link.tmuxLink = TmuxLink(sessionName: tmuxName, isShellOnly: true)
+                    }
+                    await boardState.refresh()
+                } catch {
+                    boardState.setError("Failed to create terminal: \(error.localizedDescription)")
+                    // Revert on failure
+                    try? await coordinationStore.updateLink(id: cardId) { @Sendable link in
+                        link.tmuxLink = nil
+                    }
+                    await boardState.refresh()
+                }
             }
         }
     }
@@ -1063,6 +1245,12 @@ struct ContentView: View {
 
     private func deleteCardWithCleanup(cardId: String) {
         guard let link = boardState.deleteCard(cardId: cardId) else { return }
+        // Clean up terminal cache entries
+        if let tmux = link.tmuxLink {
+            for name in tmux.allSessionNames {
+                TerminalCache.shared.remove(name)
+            }
+        }
         Task {
             let tmuxAdapter = TmuxAdapter()
             // Kill all tmux sessions (primary + extras)
@@ -1083,8 +1271,21 @@ struct ContentView: View {
         let sessionId = card.link.sessionLink?.sessionId ?? card.link.id
         let projectPath = card.link.projectPath ?? NSHomeDirectory()
 
+        // IMMEDIATE feedback: predict tmux name and update in-memory state synchronously.
+        // This prevents the card from bouncing between states while async work completes.
+        let predictedTmuxName = "claude-\(String(sessionId.prefix(8)))"
+        boardState.updateCardForLaunch(cardId: cardId, tmuxName: predictedTmuxName)
+        boardState.selectedCardId = cardId
+        KanbanLog.info("resume", "Starting resume for card=\(cardId.prefix(12)) session=\(sessionId.prefix(8)) tmux=\(predictedTmuxName)")
+
         Task {
             do {
+                // Persist tmuxLink + column to disk BEFORE launching
+                try? await coordinationStore.updateLink(id: cardId) { @Sendable link in
+                    link.tmuxLink = TmuxLink(sessionName: predictedTmuxName)
+                    link.column = .inProgress
+                }
+
                 // Resolve remote config from project settings
                 let settings = try? await settingsStore.read()
                 let project = settings?.projects.first(where: { $0.path == projectPath })
@@ -1112,24 +1313,33 @@ struct ContentView: View {
                     extraEnv = [:]
                 }
 
-                let tmuxName = try await launcher.resume(
+                let actualTmuxName = try await launcher.resume(
                     sessionId: sessionId,
                     projectPath: projectPath,
                     shellOverride: shellOverride,
                     extraEnv: extraEnv
                 )
+                KanbanLog.info("resume", "Resume launched for card=\(cardId.prefix(12)) actualTmux=\(actualTmuxName)")
 
-                // Update link with tmux session (by link.id)
-                try? await coordinationStore.updateLink(id: cardId) { @Sendable link in
-                    link.tmuxLink = TmuxLink(sessionName: tmuxName)
-                    if link.column != .inProgress {
-                        link.column = .inProgress
+                // If the actual tmux name differs from prediction (e.g. reused existing session),
+                // update the link with the real name
+                if actualTmuxName != predictedTmuxName {
+                    KanbanLog.info("resume", "Tmux name changed: predicted=\(predictedTmuxName) actual=\(actualTmuxName)")
+                    try? await coordinationStore.updateLink(id: cardId) { @Sendable link in
+                        link.tmuxLink = TmuxLink(sessionName: actualTmuxName)
                     }
+                    boardState.updateCardForLaunch(cardId: cardId, tmuxName: actualTmuxName)
                 }
-                boardState.setCardColumn(cardId: cardId, to: .inProgress)
+
                 await boardState.refresh()
             } catch {
-                boardState.error = "Resume failed: \(error.localizedDescription)"
+                KanbanLog.info("resume", "Resume failed for card=\(cardId.prefix(12)): \(error.localizedDescription)")
+                // Revert on failure
+                try? await coordinationStore.updateLink(id: cardId) { @Sendable link in
+                    link.tmuxLink = nil
+                }
+                boardState.setError("Resume failed: \(error.localizedDescription)")
+                await boardState.refresh()
             }
         }
     }

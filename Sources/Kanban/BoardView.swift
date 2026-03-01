@@ -7,6 +7,8 @@ struct BoardView: View {
     var onResumeCard: (String) -> Void = { _ in }
     var onForkCard: (String) -> Void = { _ in }
     var onCopyResumeCmd: (String) -> Void = { _ in }
+    var onCleanupWorktree: (String) -> Void = { _ in }
+    var onDeleteCard: (String) -> Void = { _ in }
     var onRefreshBacklog: () -> Void = {}
 
     var onNewTask: () -> Void = {}
@@ -37,6 +39,8 @@ struct BoardView: View {
                         onResumeCard: onResumeCard,
                         onForkCard: onForkCard,
                         onCopyResumeCmd: onCopyResumeCmd,
+                        onCleanupWorktree: onCleanupWorktree,
+                        onDeleteCard: onDeleteCard,
                         onRefreshBacklog: column == .backlog ? onRefreshBacklog : nil
                     )
                 }
@@ -45,23 +49,24 @@ struct BoardView: View {
             .padding(.top, 52)
             .padding(.bottom, 16)
         }
-        // Error banner overlaid at top
-        .overlay(alignment: .top) {
+        // Error banner at bottom
+        .overlay(alignment: .bottom) {
             if let error = state.error {
                 HStack {
                     Image(systemName: "exclamationmark.triangle")
                         .foregroundStyle(.orange)
                     Text(error)
                         .font(.caption)
+                        .lineLimit(2)
                     Spacer()
                     Button("Dismiss") { state.error = nil }
                         .buttonStyle(.borderless)
                         .font(.caption)
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 8)
+                .padding(.vertical, 10)
                 .background(.ultraThinMaterial)
-                .transition(.move(edge: .top).combined(with: .opacity))
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .animation(.easeInOut(duration: 0.2), value: state.error != nil)

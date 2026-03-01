@@ -7,13 +7,15 @@ struct NewTaskDialog: View {
     var defaultProjectPath: String?
     /// (prompt, projectPath, title, startImmediately) — creates task, optionally starts via LaunchConfirmation
     var onCreate: (String, String?, String?, Bool) -> Void = { _, _, _, _ in }
-    /// (prompt, projectPath, title, createWorktree, runRemotely) — creates and launches directly (skips LaunchConfirmation)
-    var onCreateAndLaunch: (String, String?, String?, Bool, Bool) -> Void = { _, _, _, _, _ in }
+    /// (prompt, projectPath, title, createWorktree, runRemotely, commandOverride) — creates and launches directly (skips LaunchConfirmation)
+    var onCreateAndLaunch: (String, String?, String?, Bool, Bool, String?) -> Void = { _, _, _, _, _, _ in }
 
     @State private var prompt = ""
     @State private var title = ""
     @State private var selectedProjectPath: String = ""
     @State private var customPath = ""
+    @State private var command = ""
+    @State private var commandEdited = false
     @AppStorage("startTaskImmediately") private var startImmediately = true
     @AppStorage("createWorktree") private var createWorktree = true
     @AppStorage("runRemotely") private var runRemotely = true
@@ -32,22 +34,14 @@ struct NewTaskDialog: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                TextEditor(text: $prompt)
-                    .font(.body.monospaced())
-                    .frame(minHeight: 80, maxHeight: 200)
-                    .scrollContentBackground(.hidden)
-                    .padding(8)
-                    .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
-                    .overlay(alignment: .topLeading) {
-                        if prompt.isEmpty {
-                            Text("Describe what you want Claude to do...")
-                                .font(.body.monospaced())
-                                .foregroundStyle(.tertiary)
-                                .padding(.leading, 13)
-                                .padding(.top, 16)
-                                .allowsHitTesting(false)
-                        }
-                    }
+                PromptEditor(
+                    text: $prompt,
+                    placeholder: "Describe what you want Claude to do...",
+                    onSubmit: submitForm
+                )
+                .frame(minHeight: 80, maxHeight: 200)
+                .padding(4)
+                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
             }
 
             // Title (optional)
@@ -104,19 +98,19 @@ struct NewTaskDialog: View {
                     }
                 }
 
-                // Command preview
+                // Editable command
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Command")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text(commandPreview)
+                    TextField("", text: $command)
                         .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(3)
-                        .truncationMode(.tail)
-                        .padding(8)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 6))
+                        .textFieldStyle(.roundedBorder)
+                        .onChange(of: command) {
+                            if command != commandPreview {
+                                commandEdited = true
+                            }
+                        }
                 }
             }
 
@@ -128,22 +122,7 @@ struct NewTaskDialog: View {
                 }
                 .keyboardShortcut(.cancelAction)
 
-                Button(startImmediately ? "Create & Start" : "Create") {
-                    let proj = resolvedProjectPath
-                    let titleOrNil = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : title.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if startImmediately {
-                        onCreateAndLaunch(
-                            prompt,
-                            proj,
-                            titleOrNil,
-                            createWorktree && isGitRepo,
-                            runRemotely && hasRemoteConfig
-                        )
-                    } else {
-                        onCreate(prompt, proj, titleOrNil, false)
-                    }
-                    isPresented = false
-                }
+                Button(startImmediately ? "Create & Start" : "Create", action: submitForm)
                 .keyboardShortcut(.defaultAction)
                 .disabled(prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .buttonStyle(.borderedProminent)
@@ -158,7 +137,35 @@ struct NewTaskDialog: View {
             } else if let first = projects.first {
                 selectedProjectPath = first.path
             }
+            command = commandPreview
         }
+        .onChange(of: prompt) {
+            if !commandEdited { command = commandPreview }
+        }
+        .onChange(of: createWorktree) {
+            if !commandEdited { command = commandPreview }
+        }
+    }
+
+    // MARK: - Actions
+
+    private func submitForm() {
+        guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let proj = resolvedProjectPath
+        let titleOrNil = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if startImmediately {
+            onCreateAndLaunch(
+                prompt,
+                proj,
+                titleOrNil,
+                createWorktree && isGitRepo,
+                runRemotely && hasRemoteConfig,
+                commandEdited ? command : nil
+            )
+        } else {
+            onCreate(prompt, proj, titleOrNil, false)
+        }
+        isPresented = false
     }
 
     // MARK: - Computed

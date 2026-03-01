@@ -483,7 +483,8 @@ struct TurnBlockView: View {
     // MARK: - Text block
 
     private func textBlockView(_ text: String, isFirst: Bool) -> some View {
-        HStack(alignment: .top, spacing: 0) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return HStack(alignment: .top, spacing: 0) {
             if isFirst {
                 Text("● ")
                     .font(.system(.caption, design: .monospaced))
@@ -492,7 +493,7 @@ struct TurnBlockView: View {
                 Text("  ")
                     .font(.system(.caption, design: .monospaced))
             }
-            styledText(text, color: Color(white: 0.85))
+            styledText(trimmed, color: Color(white: 0.85))
                 .font(.system(.caption, design: .monospaced))
                 .textSelection(.enabled)
                 .lineLimit(30)

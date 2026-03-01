@@ -10,17 +10,17 @@ public final class CompositeNotifier: NotifierPort, @unchecked Sendable {
         self.fallback = fallback
     }
 
-    public func sendNotification(title: String, message: String, imageData: Data?) async throws {
+    public func sendNotification(title: String, message: String, imageData: Data?, cardId: String?) async throws {
         if let primary, primary.isConfigured() {
             do {
-                try await primary.sendNotification(title: title, message: message, imageData: imageData)
+                try await primary.sendNotification(title: title, message: message, imageData: imageData, cardId: cardId)
                 return
             } catch {
                 // Fall through to fallback
             }
         }
         // Fallback doesn't support images, send text only
-        try await fallback.sendNotification(title: title, message: message, imageData: nil)
+        try await fallback.sendNotification(title: title, message: message, imageData: nil, cardId: cardId)
     }
 
     public func isConfigured() -> Bool {

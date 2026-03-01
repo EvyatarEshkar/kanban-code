@@ -50,7 +50,6 @@ struct CardDetailView: View {
 
     // Delete confirmation
     @State private var showDeleteConfirm = false
-    @State private var deleteConfirmText = ""
 
     // File watcher for real-time history
     @State private var historyWatcherFD: Int32 = -1
@@ -210,22 +209,32 @@ struct CardDetailView: View {
 
             Divider()
 
-            // Tab bar — always show Terminal, plus other relevant tabs
-            Picker("", selection: $selectedTab) {
-                Text("Terminal").tag(DetailTab.terminal)
-                Text("History").tag(DetailTab.history)
-                if card.link.issueLink != nil {
-                    Text("Issue").tag(DetailTab.issue)
+            // Tab bar + cleanup worktree button
+            HStack {
+                Picker("", selection: $selectedTab) {
+                    Text("Terminal").tag(DetailTab.terminal)
+                    Text("History").tag(DetailTab.history)
+                    if card.link.issueLink != nil {
+                        Text("Issue").tag(DetailTab.issue)
+                    }
+                    if !card.link.prLinks.isEmpty {
+                        Text("Pull Request").tag(DetailTab.pullRequest)
+                    }
+                    if card.link.promptBody != nil && card.link.issueLink == nil {
+                        Text("Prompt").tag(DetailTab.prompt)
+                    }
                 }
-                if !card.link.prLinks.isEmpty {
-                    Text("Pull Request").tag(DetailTab.pullRequest)
-                }
-                if card.link.promptBody != nil && card.link.issueLink == nil {
-                    Text("Prompt").tag(DetailTab.prompt)
+                .pickerStyle(.segmented)
+                .labelsHidden()
+
+                if card.link.worktreeLink != nil {
+                    Spacer()
+                    Button(role: .destructive, action: onCleanupWorktree) {
+                        Label("Cleanup Worktree", systemImage: "trash")
+                    }
+                    .buttonStyle(.bordered)
                 }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
 
@@ -277,6 +286,9 @@ struct CardDetailView: View {
             if selectedTab == .history {
                 startHistoryWatcher()
             }
+            if selectedTab == .pullRequest {
+                await loadPRBody()
+            }
         }
         .onChange(of: selectedTab) {
             if selectedTab == .history {
@@ -320,21 +332,14 @@ struct CardDetailView: View {
         } message: {
             Text("Everything after this point will be removed. A .bkp backup will be created.")
         }
-        .alert("Delete Task", isPresented: $showDeleteConfirm) {
-            TextField("Type \"delete\" to confirm", text: $deleteConfirmText)
-            Button("Cancel", role: .cancel) {
-                deleteConfirmText = ""
-            }
+        .alert("Delete Card", isPresented: $showDeleteConfirm) {
+            Button("Cancel", role: .cancel) {}
             Button("Delete", role: .destructive) {
-                if deleteConfirmText.lowercased() == "delete" {
-                    onDeleteCard()
-                    onDismiss()
-                }
-                deleteConfirmText = ""
+                onDeleteCard()
+                onDismiss()
             }
-            .disabled(deleteConfirmText.lowercased() != "delete")
         } message: {
-            Text("This will permanently delete this task. Type \"delete\" to confirm.")
+            Text("This will permanently delete this card and its data.")
         }
     }
 
@@ -359,11 +364,14 @@ struct CardDetailView: View {
                                         selectedTerminalSession = sessionName
                                     } label: {
                                         HStack(spacing: 4) {
-                                            Image(systemName: isPrimary ? "brain" : "terminal")
+                                            let isShellOnly = tmux.isShellOnly == true
+                                            Image(systemName: isPrimary && !isShellOnly ? "brain" : "terminal")
                                                 .font(.caption2)
-                                            Text(isPrimary ? "Claude" : sessionName.replacingOccurrences(
-                                                of: "\(tmux.sessionName)-", with: ""
-                                            ))
+                                            Text(isPrimary
+                                                 ? (isShellOnly ? "Shell" : "Claude")
+                                                 : sessionName.replacingOccurrences(
+                                                    of: "\(tmux.sessionName)-", with: ""
+                                                 ))
                                             .font(.caption)
                                             .lineLimit(1)
                                         }
@@ -433,16 +441,13 @@ struct CardDetailView: View {
 
                 Divider()
 
-                // ZStack keeps all terminals alive — no recreation on tab switch.
-                // Each session gets one TerminalRepresentable that persists as long as
-                // the card is displayed. Switching tabs only toggles visibility.
-                ZStack {
-                    ForEach(allSessions, id: \.self) { sessionName in
-                        TerminalRepresentable.tmuxAttach(sessionName: sessionName)
-                            .opacity(sessionName == currentSession ? 1 : 0)
-                            .allowsHitTesting(sessionName == currentSession)
-                    }
-                }
+                // Single AppKit container manages all terminal subviews.
+                // Terminals are created once inside TerminalContainerNSView and
+                // shown/hidden on tab switch — no SwiftUI view recreation.
+                TerminalContainerView(
+                    sessions: allSessions,
+                    activeSession: currentSession
+                )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .onChange(of: card.link.tmuxLink) {
@@ -474,10 +479,16 @@ struct CardDetailView: View {
                 Text("Start a session to see the terminal here.")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
-                Button(action: onResume) {
-                    Label("Launch Session", systemImage: "play.fill")
+                HStack(spacing: 12) {
+                    Button(action: onResume) {
+                        Label("Resume Claude", systemImage: "play.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    Button(action: onCreateTerminal) {
+                        Label("New Terminal", systemImage: "terminal")
+                    }
+                    .buttonStyle(.bordered)
                 }
-                .buttonStyle(.borderedProminent)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -553,24 +564,22 @@ struct CardDetailView: View {
                 ForEach(Array(card.link.prLinks.enumerated()), id: \.element.number) { index, pr in
                     if index > 0 { Divider().padding(.vertical, 4) }
 
-                    // Header: title + number + badge + open button
-                    HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(pr.title ?? "Pull Request")
-                                .font(.headline)
-                                .textSelection(.enabled)
+                    // Header: title + badge
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(pr.title ?? "Pull Request")
+                            .font(.headline)
+                            .textSelection(.enabled)
+                        HStack {
                             PRBadge(status: pr.status, prNumber: pr.number)
-                        }
-                        Spacer()
-                        if let url = resolvedPRURL(pr) {
-                            Button {
-                                NSWorkspace.shared.open(url)
-                            } label: {
-                                Label("Open in Browser", systemImage: "arrow.up.right.square")
-                                    .font(.caption)
+                            Spacer()
+                            if let url = resolvedPRURL(pr) {
+                                Button {
+                                    NSWorkspace.shared.open(url)
+                                } label: {
+                                    Label("Open in Browser", systemImage: "arrow.up.right.square")
+                                }
+                                .buttonStyle(.bordered)
                             }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
                         }
                     }
 
@@ -702,13 +711,18 @@ struct CardDetailView: View {
 
     private func loadPRBody() async {
         guard let pr = card.link.prLink,
-              let projectPath = card.link.projectPath else { return }
+              let projectPath = card.link.projectPath else {
+            KanbanLog.warn("detail", "loadPRBody skipped: prLink=\(card.link.prLink != nil), projectPath=\(card.link.projectPath ?? "nil")")
+            return
+        }
+        KanbanLog.info("detail", "Loading PR #\(pr.number) body from \(projectPath)")
         isLoadingPRBody = true
         do {
             let body = try await GhCliAdapter().fetchPRBody(repoRoot: projectPath, prNumber: pr.number)
             prBody = body
+            KanbanLog.info("detail", "PR #\(pr.number) body loaded: \(body?.prefix(100) ?? "nil")")
         } catch {
-            // Silently fail — body is optional
+            KanbanLog.error("detail", "PR #\(pr.number) body failed: \(error)")
         }
         isLoadingPRBody = false
     }

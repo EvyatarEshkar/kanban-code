@@ -1,86 +1,51 @@
 import Foundation
 
 /// Anti-duplicate logic for notifications.
-/// Implements: 1s delay after Stop (skip if UserPromptSubmit arrives),
-/// 62s dedup window per session, session numbering.
+/// Mirrors claude-pushover's exact approach, adapted for batch processing:
+/// - Stop: sleep 1s, check if user prompted within 1s after stop → if not, send (with 62s dedup)
+/// - Notification: send if not within 62s dedup window
+/// - UserPromptSubmit: record timestamp for debounce check
+///
+/// Key difference from claude-pushover: we process events in batches (not one-per-process),
+/// so we use EVENT TIMESTAMPS (from the hook script) instead of wall-clock Date() to avoid
+/// batch processing artifacts where future events in the batch pollute earlier events.
 public actor NotificationDeduplicator {
-    /// Per-session last notification time.
+    /// Per-session last notification event time (for 62s dedup window).
     private var lastNotified: [String: Date] = [:]
-    /// Per-session pending stop times.
-    private var pendingStops: [String: Date] = [:]
-    /// Session number assignments.
-    private var sessionNumbers: [String: Int] = [:]
-    /// Next session number.
-    private var nextNumber: Int = 1
+    /// Per-session last prompt event time (for Stop debounce).
+    private var lastPromptTime: [String: Date] = [:]
     /// Dedup window in seconds.
     private let dedupWindow: TimeInterval
-    /// Stop delay in seconds.
-    private let stopDelay: TimeInterval
-    /// Session number expiry in seconds.
-    private let numberExpiry: TimeInterval
 
-    public init(
-        dedupWindow: TimeInterval = 62,
-        stopDelay: TimeInterval = 1.0,
-        numberExpiry: TimeInterval = 10800 // 3 hours
-    ) {
+    public init(dedupWindow: TimeInterval = 62) {
         self.dedupWindow = dedupWindow
-        self.stopDelay = stopDelay
-        self.numberExpiry = numberExpiry
     }
 
-    /// Record a Stop event. Returns true if notification should be sent after delay.
-    public func recordStop(sessionId: String) -> Bool {
-        pendingStops[sessionId] = Date()
-        return true
+    /// Record a UserPromptSubmit using the event's actual timestamp.
+    public func recordPrompt(sessionId: String, at eventTime: Date) {
+        lastPromptTime[sessionId] = eventTime
     }
 
-    /// Record a UserPromptSubmit. Cancels any pending stop notification.
-    public func recordPrompt(sessionId: String) {
-        pendingStops.removeValue(forKey: sessionId)
+    /// Check if user prompted within 1s after a Stop event.
+    /// Uses event timestamps to correctly handle batch processing:
+    /// only blocks if the prompt came within 1s AFTER the stop (matching claude-pushover's 1s sleep window).
+    public func hasPromptedWithin(sessionId: String, after stopTime: Date, window: TimeInterval = 1.0) -> Bool {
+        guard let promptTime = lastPromptTime[sessionId] else { return false }
+        return promptTime > stopTime && promptTime <= stopTime.addingTimeInterval(window)
     }
 
-    /// Check if a pending stop should now fire a notification.
-    /// Call after stopDelay has elapsed.
-    public func shouldNotify(sessionId: String) -> Bool {
-        guard let stopTime = pendingStops[sessionId] else { return false }
-
-        // Check if still pending (not cancelled by a new prompt)
-        let elapsed = Date.now.timeIntervalSince(stopTime)
-        guard elapsed >= stopDelay else { return false }
-
-        // Check dedup window
+    /// Check 62s dedup window using event timestamps.
+    /// Returns true if notification should be sent.
+    public func shouldNotify(sessionId: String, eventTime: Date) -> Bool {
         if let lastTime = lastNotified[sessionId] {
-            let sinceLast = Date.now.timeIntervalSince(lastTime)
-            if sinceLast < dedupWindow { return false }
+            if eventTime.timeIntervalSince(lastTime) < dedupWindow { return false }
         }
-
-        // Clear pending and record notification
-        pendingStops.removeValue(forKey: sessionId)
-        lastNotified[sessionId] = Date()
+        lastNotified[sessionId] = eventTime
         return true
     }
 
-    /// Get or assign a session number.
-    public func sessionNumber(for sessionId: String) -> Int {
-        if let existing = sessionNumbers[sessionId] {
-            return existing
-        }
-        let number = nextNumber
-        nextNumber += 1
-        sessionNumbers[sessionId] = number
-        return number
-    }
-
-    /// Recycle expired session numbers (call periodically).
-    public func recycleExpiredNumbers(activeSessions: Set<String>) {
-        let now = Date()
-        for (sessionId, _) in sessionNumbers {
-            guard !activeSessions.contains(sessionId) else { continue }
-            if let lastTime = lastNotified[sessionId],
-               now.timeIntervalSince(lastTime) > numberExpiry {
-                sessionNumbers.removeValue(forKey: sessionId)
-            }
-        }
+    /// Clear all state (used on startup to discard stale events).
+    public func clearAllPending() {
+        lastPromptTime.removeAll()
     }
 }

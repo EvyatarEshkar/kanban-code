@@ -125,6 +125,14 @@ public actor CoordinationStore {
         }
     }
 
+    /// Atomic read-modify-write: reads current links, applies transform, writes back.
+    /// Runs entirely within the actor — no interleaving with concurrent reads/writes.
+    public func modifyLinks(_ transform: (inout [Link]) -> Void) throws {
+        var links = try readLinks()
+        transform(&links)
+        try writeLinks(links)
+    }
+
     /// The file path for external access / debugging.
     public var path: String { filePath }
 }

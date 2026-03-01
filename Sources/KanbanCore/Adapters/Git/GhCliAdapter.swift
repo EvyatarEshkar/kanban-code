@@ -6,6 +6,7 @@ public final class GhCliAdapter: PRTrackerPort, @unchecked Sendable {
     public init() {}
 
     public func fetchPRs(repoRoot: String) async throws -> [String: PullRequest] {
+        KanbanLog.info("gh", "fetchPRs for \(repoRoot)")
         let result = try await ShellCommand.run(
             "/usr/bin/env",
             arguments: [
@@ -15,7 +16,10 @@ public final class GhCliAdapter: PRTrackerPort, @unchecked Sendable {
             currentDirectory: repoRoot
         )
 
-        guard result.succeeded, !result.stdout.isEmpty else { return [:] }
+        guard result.succeeded, !result.stdout.isEmpty else {
+            KanbanLog.warn("gh", "fetchPRs failed or empty for \(repoRoot): exit=\(result.exitCode) stderr=\(result.stderr.prefix(200))")
+            return [:]
+        }
         guard let data = result.stdout.data(using: .utf8),
               let items = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
             return [:]
@@ -191,6 +195,120 @@ public final class GhCliAdapter: PRTrackerPort, @unchecked Sendable {
 
             prs[branch] = pr
         }
+    }
+
+    /// Batch lookup: find PRs by branch name + refresh existing PRs by number.
+    /// Single GraphQL call per repo instead of N individual `gh pr` calls.
+    public func batchPRLookup(
+        repoRoot: String,
+        branches: [String],
+        prNumbers: [Int]
+    ) async throws -> (byBranch: [String: PullRequest], byNumber: [Int: PullRequest]) {
+        guard !branches.isEmpty || !prNumbers.isEmpty else { return ([:], [:]) }
+
+        // Get repo owner/name
+        let repoResult = try await ShellCommand.run(
+            "/usr/bin/env",
+            arguments: ["gh", "repo", "view", "--json", "owner,name"],
+            currentDirectory: repoRoot
+        )
+        guard repoResult.succeeded,
+              let repoData = repoResult.stdout.data(using: .utf8),
+              let repoInfo = try? JSONSerialization.jsonObject(with: repoData) as? [String: Any],
+              let owner = repoInfo["owner"] as? [String: Any],
+              let ownerLogin = owner["login"] as? String,
+              let repoName = repoInfo["name"] as? String else {
+            return ([:], [:])
+        }
+
+        var queryParts: [String] = []
+        var branchAliases: [String: String] = [:] // alias → branch
+        var numberAliases: [String: Int] = [:]    // alias → prNumber
+
+        // Branch lookups via pullRequests(headRefName:)
+        for (i, branch) in branches.enumerated() {
+            let alias = "branch\(i)"
+            branchAliases[alias] = branch
+            queryParts.append("""
+            \(alias): pullRequests(headRefName: "\(branch)", first: 1, states: [OPEN, CLOSED, MERGED], orderBy: {field: CREATED_AT, direction: DESC}) {
+              nodes { number title state url headRefName reviewDecision }
+            }
+            """)
+        }
+
+        // PR number lookups
+        for (i, number) in prNumbers.enumerated() {
+            let alias = "pr\(i)"
+            numberAliases[alias] = number
+            queryParts.append("""
+            \(alias): pullRequest(number: \(number)) {
+              number title state url headRefName reviewDecision
+            }
+            """)
+        }
+
+        let query = """
+        query {
+          repository(owner: "\(ownerLogin)", name: "\(repoName)") {
+            \(queryParts.joined(separator: "\n"))
+          }
+        }
+        """
+
+        let result = try await ShellCommand.run(
+            "/usr/bin/env",
+            arguments: ["gh", "api", "graphql", "-f", "query=\(query)"],
+            currentDirectory: repoRoot
+        )
+
+        guard result.succeeded,
+              let data = result.stdout.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let dataObj = root["data"] as? [String: Any],
+              let repo = dataObj["repository"] as? [String: Any] else {
+            KanbanLog.warn("gh", "batchPRLookup GraphQL failed: \(result.stderr.prefix(200))")
+            return ([:], [:])
+        }
+
+        var byBranch: [String: PullRequest] = [:]
+        var byNumber: [Int: PullRequest] = [:]
+
+        for (alias, branch) in branchAliases {
+            guard let container = repo[alias] as? [String: Any],
+                  let nodes = container["nodes"] as? [[String: Any]],
+                  let item = nodes.first else { continue }
+            if let pr = parsePRFromGraphQL(item) {
+                byBranch[branch] = pr
+            }
+        }
+
+        for (alias, number) in numberAliases {
+            guard let item = repo[alias] as? [String: Any] else { continue }
+            if let pr = parsePRFromGraphQL(item) {
+                byNumber[number] = pr
+            }
+        }
+
+        return (byBranch, byNumber)
+    }
+
+    private func parsePRFromGraphQL(_ item: [String: Any]) -> PullRequest? {
+        guard let number = item["number"] as? Int,
+              let title = item["title"] as? String,
+              let state = item["state"] as? String,
+              let url = item["url"] as? String,
+              let headRefName = item["headRefName"] as? String else {
+            return nil
+        }
+        let reviewDecision = item["reviewDecision"] as? String
+        return PullRequest(
+            number: number,
+            title: title,
+            state: state.lowercased() == "merged" ? "merged" : state.lowercased(),
+            url: url,
+            headRefName: headRefName,
+            reviewDecision: reviewDecision
+        )
     }
 
     public func fetchPRBody(repoRoot: String, prNumber: Int) async throws -> String? {

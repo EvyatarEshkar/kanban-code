@@ -82,6 +82,12 @@ public actor ClaudeCodeActivityDetector: ActivityDetector {
 
         switch lastEvent.eventName {
         case "UserPromptSubmit", "SessionStart":
+            // If no follow-up event arrived within 2 minutes, fall back to polling.
+            // This handles cases where Claude finishes quickly without sending Stop.
+            let timeSince = Date.now.timeIntervalSince(lastEvent.timestamp)
+            if timeSince > 120 {
+                return polledStates[sessionId] ?? .idleWaiting
+            }
             return .activelyWorking
         case "Stop":
             // Stop is the definitive signal — immediately needs attention

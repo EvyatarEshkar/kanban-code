@@ -19,12 +19,11 @@ public struct KanbanCard: Identifiable, Sendable {
         activityState == .activelyWorking
     }
 
-    /// Best display title: link name → session display title → session ID prefix.
+    /// Best display title: link name → session display title → link fallback chain.
     public var displayTitle: String {
         if let name = link.name, !name.isEmpty { return name }
         if let session { return session.displayTitle }
-        if let sid = link.sessionLink?.sessionId { return String(sid.prefix(8)) + "..." }
-        return String(link.id.prefix(8)) + "..."
+        return link.displayTitle
     }
 
     /// Project name extracted from project path.
@@ -88,6 +87,7 @@ public final class BoardState: @unchecked Sendable {
     private let settingsStore: SettingsStore?
     private let ghAdapter: GhCliAdapter?
     private let worktreeAdapter: GitWorktreeAdapter?
+    private let tmuxAdapter: TmuxAdapter?
     public let sessionStore: SessionStore
 
     public init(
@@ -97,6 +97,7 @@ public final class BoardState: @unchecked Sendable {
         settingsStore: SettingsStore? = nil,
         ghAdapter: GhCliAdapter? = nil,
         worktreeAdapter: GitWorktreeAdapter? = nil,
+        tmuxAdapter: TmuxAdapter? = TmuxAdapter(),
         sessionStore: SessionStore = ClaudeCodeSessionStore()
     ) {
         self.discovery = discovery
@@ -105,6 +106,7 @@ public final class BoardState: @unchecked Sendable {
         self.settingsStore = settingsStore
         self.ghAdapter = ghAdapter
         self.worktreeAdapter = worktreeAdapter
+        self.tmuxAdapter = tmuxAdapter
         self.sessionStore = sessionStore
     }
 
@@ -167,6 +169,26 @@ public final class BoardState: @unchecked Sendable {
             result.append(.allSessions)
         }
         return result
+    }
+
+    /// Add a new card to the board immediately (synchronous, no disk round-trip).
+    /// Caller should persist via coordinationStore.upsertLink() separately.
+    public func addCard(link: Link) {
+        let card = KanbanCard(link: link)
+        cards.append(card)
+    }
+
+    /// Update a card's in-memory state for an active launch.
+    /// Sets tmuxLink + column to .inProgress. Does NOT persist — caller handles persistence.
+    public func updateCardForLaunch(cardId: String, tmuxName: String, isShellOnly: Bool = false) {
+        guard let index = cards.firstIndex(where: { $0.id == cardId }) else { return }
+        var link = cards[index].link
+        link.tmuxLink = TmuxLink(sessionName: tmuxName, isShellOnly: isShellOnly)
+        link.column = .inProgress
+        link.updatedAt = .now
+        let session = cards[index].session
+        let activity = cards[index].activityState
+        cards[index] = KanbanCard(link: link, session: session, activityState: activity)
     }
 
     /// Rename a card (manual override).
@@ -318,10 +340,23 @@ public final class BoardState: @unchecked Sendable {
         }
     }
 
+    /// Set an error message that auto-dismisses after a delay.
+    public func setError(_ message: String, autoDismissSeconds: Double = 8) {
+        error = message
+        let dismissId = UUID()
+        _lastErrorId = dismissId
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(autoDismissSeconds))
+            if _lastErrorId == dismissId {
+                error = nil
+            }
+        }
+    }
+    private var _lastErrorId: UUID?
+
     /// Full refresh: discover sessions, load links, merge, assign columns.
     public func refresh() async {
         isLoading = true
-        error = nil
 
         do {
             // Load settings for project filtering
@@ -350,6 +385,7 @@ public final class BoardState: @unchecked Sendable {
                     let repoRoot = project.effectiveRepoRoot
                     if let worktrees = try? await worktreeAdapter.listWorktrees(repoRoot: repoRoot) {
                         worktreesByRepo[repoRoot] = worktrees
+                        KanbanLog.info("refresh", "Scanned \(worktrees.count) worktrees for \(repoRoot)")
                     }
                 }
             }
@@ -360,27 +396,103 @@ public final class BoardState: @unchecked Sendable {
                 for project in configuredProjects {
                     let repoRoot = project.effectiveRepoRoot
                     if let prs = try? await ghAdapter.fetchPRs(repoRoot: repoRoot) {
+                        for (branch, pr) in prs {
+                            KanbanLog.info("refresh", "PR #\(pr.number) [\(pr.state)] on branch \(branch) — \(pr.title)")
+                        }
                         pullRequests.merge(prs, uniquingKeysWith: { existing, _ in existing })
                     }
                 }
             }
 
+            // Scan tmux sessions (to detect dead links)
+            let tmuxSessions = (try? await tmuxAdapter?.listSessions()) ?? []
+
             // Reconcile: match sessions/worktrees/PRs to existing cards
             let snapshot = CardReconciler.DiscoverySnapshot(
                 sessions: sessions,
+                tmuxSessions: tmuxSessions,
+                didScanTmux: tmuxAdapter != nil,
                 worktrees: worktreesByRepo,
                 pullRequests: pullRequests
             )
             var mergedLinks = CardReconciler.reconcile(existing: existingLinks, snapshot: snapshot)
+            KanbanLog.info("refresh", "Reconciled: \(existingLinks.count) existing → \(mergedLinks.count) merged (\(sessions.count) sessions, \(worktreesByRepo.values.flatMap { $0 }.count) worktrees, \(pullRequests.count) PRs)")
+
+            // Post-reconciliation: targeted PR discovery + status refresh via batched GraphQL
+            if let ghAdapter {
+                let coveredBranches = Set(pullRequests.keys)
+                let coveredPRNumbers = Set(pullRequests.values.map(\.number))
+
+                // Group lookups by repo for batching
+                var branchesByRepo: [String: [(index: Int, branch: String)]] = [:]
+                var prNumbersByRepo: [String: [(index: Int, prIndex: Int, number: Int)]] = [:]
+
+                for i in mergedLinks.indices {
+                    let link = mergedLinks[i]
+                    guard !link.manuallyArchived else { continue }
+                    guard let repoRoot = link.projectPath, !repoRoot.isEmpty else { continue }
+
+                    if let branch = link.worktreeLink?.branch, link.prLinks.isEmpty, !coveredBranches.contains(branch) {
+                        branchesByRepo[repoRoot, default: []].append((index: i, branch: branch))
+                    }
+                    for j in link.prLinks.indices {
+                        let prNumber = link.prLinks[j].number
+                        if !coveredPRNumbers.contains(prNumber) {
+                            prNumbersByRepo[repoRoot, default: []].append((index: i, prIndex: j, number: prNumber))
+                        }
+                    }
+                }
+
+                let allRepos = Set(branchesByRepo.keys).union(prNumbersByRepo.keys)
+                for repoRoot in allRepos {
+                    let branches = (branchesByRepo[repoRoot] ?? []).map(\.branch)
+                    let numbers = (prNumbersByRepo[repoRoot] ?? []).map(\.number)
+                    guard !branches.isEmpty || !numbers.isEmpty else { continue }
+
+                    KanbanLog.info("refresh", "Batch PR lookup for \(repoRoot): \(branches.count) branches, \(numbers.count) PRs to refresh")
+                    let (byBranch, byNumber) = (try? await ghAdapter.batchPRLookup(repoRoot: repoRoot, branches: branches, prNumbers: numbers)) ?? ([:], [:])
+
+                    for entry in branchesByRepo[repoRoot] ?? [] {
+                        if let pr = byBranch[entry.branch] {
+                            mergedLinks[entry.index].prLinks.append(PRLink(number: pr.number, url: pr.url, status: pr.status, title: pr.title))
+                            KanbanLog.info("refresh", "Discovered PR #\(pr.number) [\(pr.status)] for branch=\(entry.branch)")
+                        }
+                    }
+                    for entry in prNumbersByRepo[repoRoot] ?? [] {
+                        if let pr = byNumber[entry.number] {
+                            mergedLinks[entry.index].prLinks[entry.prIndex].status = pr.status
+                            mergedLinks[entry.index].prLinks[entry.prIndex].title = pr.title
+                            mergedLinks[entry.index].prLinks[entry.prIndex].url = pr.url
+                            KanbanLog.info("refresh", "Refreshed PR #\(entry.number) → \(pr.status)")
+                        }
+                    }
+                }
+            }
 
             // Recalculate columns: f(state) = column
             // Column is a derived property, not stored state — always recompute.
+            let liveTmuxNames = Set(tmuxSessions.map(\.name))
             var newCards: [KanbanCard] = []
             for i in mergedLinks.indices {
                 let sessionId = mergedLinks[i].sessionLink?.sessionId ?? mergedLinks[i].id
                 let activity = await activityDetector?.activityState(for: sessionId)
                 let hasWorktree = mergedLinks[i].worktreeLink?.branch != nil
-                UpdateCardColumn.update(link: &mergedLinks[i], activityState: activity, hasWorktree: hasWorktree)
+                let hasTmux = mergedLinks[i].tmuxLink.map { tmux in
+                    tmux.allSessionNames.contains(where: { liveTmuxNames.contains($0) })
+                } ?? false
+                let oldColumn = mergedLinks[i].column
+                UpdateCardColumn.update(link: &mergedLinks[i], activityState: activity, hasWorktree: hasWorktree || hasTmux)
+                if mergedLinks[i].column != oldColumn {
+                    let sessionIdStr = mergedLinks[i].sessionLink.map { String($0.sessionId.prefix(8)) } ?? "nil"
+                    KanbanLog.info("refresh", "Column changed for \(mergedLinks[i].id.prefix(12)): \(oldColumn) → \(mergedLinks[i].column) (activity=\(activity.map { "\($0)" } ?? "nil"), hasWorktree=\(hasWorktree), hasTmux=\(hasTmux), source=\(mergedLinks[i].source), tmux=\(mergedLinks[i].tmuxLink?.sessionName ?? "nil"), session=\(sessionIdStr))")
+                }
+                // Copy session's firstPrompt into link.promptBody so notifications can use it
+                if mergedLinks[i].promptBody == nil,
+                   let session = mergedLinks[i].sessionLink.flatMap({ sessionsById[$0.sessionId] }),
+                   let firstPrompt = session.firstPrompt, !firstPrompt.isEmpty {
+                    mergedLinks[i].promptBody = firstPrompt
+                }
+
                 newCards.append(KanbanCard(
                     link: mergedLinks[i],
                     session: mergedLinks[i].sessionLink.flatMap { sessionsById[$0.sessionId] },
@@ -398,8 +510,21 @@ public final class BoardState: @unchecked Sendable {
                 configuredProjects: configuredProjects
             )
 
-            // Persist recalculated columns + merged links
-            try? await coordinationStore.writeLinks(mergedLinks)
+            // Persist recalculated columns + merged links (atomic merge to avoid overwriting concurrent additions)
+            let mergedById = Dictionary(mergedLinks.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+            try? await coordinationStore.modifyLinks { freshLinks in
+                // Update existing links with reconciled data
+                for i in freshLinks.indices {
+                    if let merged = mergedById[freshLinks[i].id] {
+                        freshLinks[i] = merged
+                    }
+                }
+                // Add newly discovered links that don't exist in the store yet
+                let freshIds = Set(freshLinks.map(\.id))
+                for link in mergedLinks where !freshIds.contains(link.id) {
+                    freshLinks.append(link)
+                }
+            }
 
             // Fetch GitHub issues if enough time has elapsed
             await refreshGitHubIssuesIfNeeded()
@@ -410,7 +535,7 @@ public final class BoardState: @unchecked Sendable {
                 selectedCardId = nil
             }
         } catch {
-            self.error = error.localizedDescription
+            setError(error.localizedDescription)
         }
 
         isLoading = false
@@ -485,7 +610,7 @@ public final class BoardState: @unchecked Sendable {
                 }
             } catch {
                 // Surface GitHub API errors briefly
-                self.error = "GitHub: \(error.localizedDescription)"
+                setError("GitHub: \(error.localizedDescription)")
             }
         }
 

@@ -11,7 +11,7 @@ public final class PushoverClient: NotifierPort, @unchecked Sendable {
         self.userKey = userKey
     }
 
-    public func sendNotification(title: String, message: String, imageData: Data?) async throws {
+    public func sendNotification(title: String, message: String, imageData: Data?, cardId: String?) async throws {
         var request = URLRequest(url: apiURL)
         request.httpMethod = "POST"
 

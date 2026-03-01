@@ -11,7 +11,9 @@ struct CardView: View {
     var onFork: () -> Void = {}
     var onRename: () -> Void = {}
     var onCopyResumeCmd: () -> Void = {}
+    var onCleanupWorktree: () -> Void = {}
     var onArchive: () -> Void = {}
+    var onDelete: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -154,6 +156,12 @@ struct CardView: View {
             Button(action: onCopyResumeCmd) {
                 Label("Copy Resume Command", systemImage: "doc.on.doc")
             }
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(card.id, forType: .string)
+            } label: {
+                Label("Copy Card ID", systemImage: "number")
+            }
             Divider()
             ForEach(card.link.prLinks, id: \.number) { pr in
                 Button {
@@ -173,9 +181,24 @@ struct CardView: View {
                     Label("Open Issue #\(issue.number)", systemImage: "arrow.up.right.square")
                 }
             }
+            if card.link.worktreeLink != nil {
+                Divider()
+                Button(role: .destructive, action: onCleanupWorktree) {
+                    Label("Cleanup Worktree", systemImage: "trash")
+                }
+            }
             Divider()
-            Button(action: onArchive) {
-                Label("Archive", systemImage: "archivebox")
+            if card.link.manuallyArchived {
+                // Already archived — offer delete (but not for pure issues that would reappear)
+                if card.link.source != .githubIssue {
+                    Button(role: .destructive, action: onDelete) {
+                        Label("Delete Card", systemImage: "trash")
+                    }
+                }
+            } else {
+                Button(action: onArchive) {
+                    Label("Archive", systemImage: "archivebox")
+                }
             }
         }
     }

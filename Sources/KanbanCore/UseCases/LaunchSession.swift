@@ -14,27 +14,33 @@ public final class LaunchSession: SessionLauncher, @unchecked Sendable {
         prompt: String,
         worktreeName: String?,
         shellOverride: String?,
-        extraEnv: [String: String] = [:]
+        extraEnv: [String: String] = [:],
+        commandOverride: String? = nil
     ) async throws -> String {
         let sessionName = Self.tmuxSessionName(project: projectPath, worktree: worktreeName)
 
-        // Build the claude command
-        var cmd = "claude"
-        if let worktreeName {
-            if worktreeName.isEmpty {
-                // Empty string = auto-generate worktree name
-                cmd += " --worktree"
-            } else {
-                cmd += " --worktree \(worktreeName)"
+        let cmd: String
+        if let commandOverride, !commandOverride.isEmpty {
+            // User provided a custom command — use it as-is
+            cmd = commandOverride
+        } else {
+            // Build the claude command
+            var built = "claude"
+            if let worktreeName {
+                if worktreeName.isEmpty {
+                    built += " --worktree"
+                } else {
+                    built += " --worktree \(worktreeName)"
+                }
             }
-        }
+            built += " -p \(shellEscape(prompt))"
 
-        cmd += " -p \(shellEscape(prompt))"
-
-        // Prepend environment variables (SHELL override + KANBAN_* vars)
-        let envPrefix = buildEnvPrefix(shellOverride: shellOverride, extraEnv: extraEnv)
-        if !envPrefix.isEmpty {
-            cmd = envPrefix + " " + cmd
+            // Prepend environment variables (SHELL override + KANBAN_* vars)
+            let envPrefix = buildEnvPrefix(shellOverride: shellOverride, extraEnv: extraEnv)
+            if !envPrefix.isEmpty {
+                built = envPrefix + " " + built
+            }
+            cmd = built
         }
 
         try await tmux.createSession(name: sessionName, path: projectPath, command: cmd)

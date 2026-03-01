@@ -7,11 +7,43 @@ public final class MacOSNotificationClient: NotifierPort, @unchecked Sendable {
 
     public init() {}
 
-    public func sendNotification(title: String, message: String, imageData: Data?) async throws {
+    public func sendNotification(title: String, message: String, imageData: Data?, cardId: String?) async throws {
+        let center = UNUserNotificationCenter.current()
+
+        // Check current authorization status
+        let settings = await center.notificationSettings()
+        guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else {
+            KanbanLog.info("notify", "Notification skipped: authorization=\(settings.authorizationStatus.rawValue)")
+            return
+        }
+
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = message
         content.sound = .default
+
+        // Pass card ID for click-to-open handling
+        if let cardId {
+            content.userInfo = ["cardId": cardId]
+        }
+
+        // Attach rendered image (shows as thumbnail on notification)
+        if let imageData {
+            let tmpURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString)
+                .appendingPathExtension("png")
+            do {
+                try imageData.write(to: tmpURL)
+                let attachment = try UNNotificationAttachment(
+                    identifier: "image",
+                    url: tmpURL,
+                    options: [UNNotificationAttachmentOptionsTypeHintKey: "public.png"]
+                )
+                content.attachments = [attachment]
+            } catch {
+                KanbanLog.info("notify", "Image attachment failed: \(error)")
+            }
+        }
 
         let request = UNNotificationRequest(
             identifier: UUID().uuidString,
@@ -19,7 +51,13 @@ public final class MacOSNotificationClient: NotifierPort, @unchecked Sendable {
             trigger: nil  // Deliver immediately
         )
 
-        try await UNUserNotificationCenter.current().add(request)
+        do {
+            try await center.add(request)
+            KanbanLog.info("notify", "macOS notification delivered: \(title)")
+        } catch {
+            KanbanLog.info("notify", "Notification failed: \(error)")
+            throw error
+        }
     }
 
     public func isConfigured() -> Bool {

@@ -34,6 +34,14 @@ app: build
 	@echo '<key>CFBundleIconFile</key><string>AppIcon</string>' >> $(BUNDLE_DIR)/Contents/Info.plist
 	@echo '<key>CFBundleIconName</key><string>AppIcon</string>' >> $(BUNDLE_DIR)/Contents/Info.plist
 	@echo '</dict></plist>' >> $(BUNDLE_DIR)/Contents/Info.plist
+	@# Copy SPM bundle resources (clawd icon, etc.)
+	@if [ -d .build/arm64-apple-macosx/debug/Kanban_Kanban.bundle ]; then \
+		cp -R .build/arm64-apple-macosx/debug/Kanban_Kanban.bundle $(BUNDLE_DIR)/Contents/Resources/; \
+	fi
+	@# Code sign so macOS grants notification permissions
+	@codesign --force --sign - $(BUNDLE_DIR)
+	@# Register with Launch Services so macOS picks up the icon
+	@/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister -f $(BUNDLE_DIR) 2>/dev/null || true
 	@echo "Built $(BUNDLE_DIR)"
 
 run-app: app

@@ -398,6 +398,87 @@ struct BoardStateIntegrationTests {
         let s1 = state.cards.first(where: { $0.link.sessionLink?.sessionId == "s1" })
         #expect(s1?.link.name == "Custom")
     }
+    // MARK: - Launch/Resume immediate feedback
+
+    @Test("updateCardForLaunch sets tmuxLink and column immediately")
+    func updateCardForLaunchImmediate() async throws {
+        let dir = try makeTempDir()
+        defer { cleanup(dir) }
+
+        let discovery = MockSessionDiscovery()
+        discovery.sessions = [
+            Session(id: "s1", messageCount: 1, modifiedTime: .now),
+        ]
+        let store = CoordinationStore(basePath: dir)
+        let state = BoardState(discovery: discovery, coordinationStore: store)
+
+        await state.refresh()
+        let cardId = state.cards.first(where: { $0.link.sessionLink?.sessionId == "s1" })!.id
+
+        // Simulate launch: update card in-memory
+        state.updateCardForLaunch(cardId: cardId, tmuxName: "claude-abc12345")
+
+        // Verify immediate in-memory state
+        let card = state.cards.first(where: { $0.id == cardId })
+        #expect(card?.link.tmuxLink?.sessionName == "claude-abc12345")
+        #expect(card?.link.column == .inProgress)
+    }
+
+    @Test("updateCardForLaunch persists column to disk")
+    func updateCardForLaunchPersistsColumn() async throws {
+        let dir = try makeTempDir()
+        defer { cleanup(dir) }
+
+        let discovery = MockSessionDiscovery()
+        discovery.sessions = [
+            Session(id: "s1", messageCount: 1, modifiedTime: .now),
+        ]
+        let store = CoordinationStore(basePath: dir)
+        let state = BoardState(discovery: discovery, coordinationStore: store)
+
+        await state.refresh()
+        let cardId = state.cards.first(where: { $0.link.sessionLink?.sessionId == "s1" })!.id
+
+        // Simulate launch: update in-memory + persist
+        state.updateCardForLaunch(cardId: cardId, tmuxName: "claude-abc12345")
+        try await store.updateLink(id: cardId) { link in
+            link.tmuxLink = TmuxLink(sessionName: "claude-abc12345")
+            link.column = .inProgress
+        }
+
+        // Verify disk persistence
+        let links = try await store.readLinks()
+        let persisted = links.first(where: { $0.id == cardId })
+        #expect(persisted?.tmuxLink?.sessionName == "claude-abc12345")
+        #expect(persisted?.column == .inProgress)
+    }
+
+    @Test("addCard makes card visible immediately")
+    func addCardImmediate() async throws {
+        let dir = try makeTempDir()
+        defer { cleanup(dir) }
+
+        let discovery = MockSessionDiscovery()
+        let store = CoordinationStore(basePath: dir)
+        let state = BoardState(discovery: discovery, coordinationStore: store)
+
+        await state.refresh()
+        #expect(state.cards.isEmpty)
+
+        // Add a manual task card
+        let link = Link(
+            name: "Fix auth bug",
+            projectPath: "/projects/test",
+            source: .manual,
+            promptBody: "Fix the auth bug"
+        )
+        state.addCard(link: link)
+
+        // Should be visible immediately
+        #expect(state.cards.count == 1)
+        #expect(state.cards[0].link.name == "Fix auth bug")
+        #expect(state.cards[0].link.source == .manual)
+    }
 }
 
 @Suite("Deep Search")

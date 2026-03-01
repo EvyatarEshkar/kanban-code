@@ -210,9 +210,12 @@ Feature: Session Launching
   Scenario: Resume without tmux session
     Given a card has sessionLink but no tmuxLink
     When I click "Resume"
+    Then the card should IMMEDIATELY move to "In Progress" (synchronous update)
+    And the drawer should open on the terminal tab
     Then a new tmux session should be created
     And `claude --resume <sessionId>` should be run inside it
     And the card should gain a tmuxLink
+    And the card should NOT bounce between states (no waiting → in progress flicker)
 
   Scenario: Copy resume command
     Given a card has sessionLink.sessionId = "abc-123"

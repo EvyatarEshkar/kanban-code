@@ -161,4 +161,32 @@ struct EntityTests {
         #expect(decoded.title == nil)
         #expect(decoded.body == "some body")
     }
+
+    // MARK: - TmuxLink
+
+    @Test("TmuxLink defaults to Claude session (not shell-only)")
+    func tmuxLinkDefaultNotShellOnly() {
+        let tmux = TmuxLink(sessionName: "my-project")
+        #expect(tmux.isShellOnly == nil)
+        #expect(tmux.sessionName == "my-project")
+    }
+
+    @Test("TmuxLink shell-only flag round-trips through JSON")
+    func tmuxLinkShellOnlyRoundTrip() throws {
+        let tmux = TmuxLink(sessionName: "my-project", isShellOnly: true)
+        #expect(tmux.isShellOnly == true)
+
+        let data = try JSONEncoder().encode(tmux)
+        let decoded = try JSONDecoder().decode(TmuxLink.self, from: data)
+        #expect(decoded.isShellOnly == true)
+        #expect(decoded.sessionName == "my-project")
+    }
+
+    @Test("TmuxLink backward-compat decodes without isShellOnly")
+    func tmuxLinkBackwardCompat() throws {
+        let json = #"{"sessionName":"old-session"}"#
+        let decoded = try JSONDecoder().decode(TmuxLink.self, from: json.data(using: .utf8)!)
+        #expect(decoded.sessionName == "old-session")
+        #expect(decoded.isShellOnly == nil)
+    }
 }
