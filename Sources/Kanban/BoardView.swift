@@ -9,14 +9,10 @@ struct BoardView: View {
     var onCopyResumeCmd: (String) -> Void = { _ in }
     var onRefreshBacklog: () -> Void = {}
 
+    var onNewTask: () -> Void = {}
+
     var body: some View {
-        Group {
-            if state.filteredCards.isEmpty && !state.isLoading {
-                emptyState
-            } else {
-                boardContent
-            }
-        }
+        boardContent
     }
 
     private var boardContent: some View {
@@ -69,38 +65,32 @@ struct BoardView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: state.error != nil)
-    }
+        // Empty board hint
+        .overlay {
+            if state.filteredCards.isEmpty && !state.isLoading {
+                VStack(spacing: 12) {
+                    if let projectPath = state.selectedProjectPath {
+                        let name = state.configuredProjects.first(where: { $0.path == projectPath })?.name
+                            ?? (projectPath as NSString).lastPathComponent
+                        Text("No sessions yet for \(name)")
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("No sessions found")
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("Create a new task or start a Claude session to get going.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
 
-    private var emptyState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "rectangle.on.rectangle.slash")
-                .font(.system(size: 40))
-                .foregroundStyle(.tertiary)
-
-            if let projectPath = state.selectedProjectPath {
-                let name = state.configuredProjects.first(where: { $0.path == projectPath })?.name
-                    ?? (projectPath as NSString).lastPathComponent
-                Text("No sessions for \(name)")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-                Text("Sessions for this project will appear here once discovered.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            } else {
-                Text("No sessions found")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-                Text("Claude Code sessions will appear here once discovered.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    Button(action: onNewTask) {
+                        Label("New Task", systemImage: "plus")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                }
             }
-
-            Button("Refresh") {
-                Task { await state.refresh() }
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

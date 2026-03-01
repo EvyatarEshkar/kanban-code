@@ -587,13 +587,19 @@ struct ProjectsSettingsView: View {
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let path = url.path
-        // Check for duplicates before opening the edit sheet
+        // Check for duplicates
         if projects.contains(where: { $0.path == path }) {
             error = "Project already configured at this path"
             return
         }
-        isEditingNew = true
-        editingProject = Project(path: path)
+        // Add directly then open edit sheet — avoids sheet-from-settings issues
+        let project = Project(path: path)
+        Task {
+            try? await settingsStore.addProject(project)
+            await loadSettings()
+            // Open edit sheet so user can configure name/filter
+            editingProject = projects.first(where: { $0.path == path })
+        }
     }
 
     private func deleteProject(_ project: Project) {

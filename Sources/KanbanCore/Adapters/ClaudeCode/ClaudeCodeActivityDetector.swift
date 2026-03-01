@@ -6,6 +6,8 @@ public actor ClaudeCodeActivityDetector: ActivityDetector {
     private var lastEvents: [String: HookEvent] = [:]
     /// Stores the last known mtime per session (for polling fallback).
     private var lastMtimes: [String: Date] = [:]
+    /// Stores the last polled activity state per session.
+    private var polledStates: [String: ActivityState] = [:]
     /// Sessions that received a Stop but might get a follow-up prompt.
     private var pendingStops: [String: Date] = [:]
     /// Delay before treating a Stop as final (seconds).
@@ -18,8 +20,11 @@ public actor ClaudeCodeActivityDetector: ActivityDetector {
     public func handleHookEvent(_ event: HookEvent) async {
         lastEvents[event.sessionId] = event
 
-        // Clear pending stops on any new activity
-        if event.eventName == "UserPromptSubmit" || event.eventName == "SessionStart" {
+        if event.eventName == "Stop" {
+            // Record stop — will be resolved after stopDelay if no follow-up prompt
+            pendingStops[event.sessionId] = event.timestamp
+        } else if event.eventName == "UserPromptSubmit" || event.eventName == "SessionStart" {
+            // Clear pending stops on any new activity
             pendingStops.removeValue(forKey: event.sessionId)
         }
     }
@@ -60,13 +65,19 @@ public actor ClaudeCodeActivityDetector: ActivityDetector {
             }
         }
 
+        // Store poll results for use by activityState(for:)
+        for (id, state) in states {
+            polledStates[id] = state
+        }
+
         return states
     }
 
     public func activityState(for sessionId: String) async -> ActivityState {
         // Check hook-based detection first
         guard let lastEvent = lastEvents[sessionId] else {
-            return .stale
+            // No hook events — use polled state if available
+            return polledStates[sessionId] ?? .stale
         }
 
         switch lastEvent.eventName {

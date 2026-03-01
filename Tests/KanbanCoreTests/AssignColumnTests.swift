@@ -20,10 +20,10 @@ struct AssignColumnTests {
         #expect(col == .allSessions)
     }
 
-    @Test("PR merged → done")
-    func prMerged() {
-        let link = Link(sessionLink: SessionLink(sessionId: "s1"))
-        let col = AssignColumn.assign(link: link, prMerged: true)
+    @Test("All PRs merged → done")
+    func allPRsDone() {
+        let link = Link(sessionLink: SessionLink(sessionId: "s1"), prLinks: [PRLink(number: 1, status: .merged)])
+        let col = AssignColumn.assign(link: link, hasPR: true, allPRsDone: true)
         #expect(col == .done)
     }
 

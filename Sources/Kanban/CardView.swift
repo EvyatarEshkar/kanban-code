@@ -52,31 +52,44 @@ struct CardView: View {
 
                 Spacer()
 
-                // Tmux indicator (green when attached)
-                if card.link.tmuxLink != nil {
-                    Image(systemName: "terminal")
-                        .font(.caption2)
-                        .foregroundStyle(.green)
+                // Tmux indicator (green when attached, shows count for 2+)
+                if let tmux = card.link.tmuxLink {
+                    HStack(spacing: 2) {
+                        Image(systemName: "terminal")
+                            .font(.caption2)
+                            .foregroundStyle(.green)
+                        if tmux.terminalCount > 1 {
+                            Text(verbatim: "\(tmux.terminalCount)")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(.green)
+                        }
+                    }
                 }
 
-                // PR badge with status
-                if let pr = card.link.prLink {
-                    if let status = pr.status {
-                        PRBadge(status: status, prNumber: pr.number)
+                // PR badge(s) — worst status across all PRs
+                if let primary = card.link.prLink {
+                    if let status = card.link.worstPRStatus {
+                        PRBadge(status: status, prNumber: primary.number)
                     } else {
                         HStack(spacing: 2) {
                             Image(systemName: "arrow.triangle.pull")
                                 .font(.caption2)
-                            Text(verbatim: "#\(pr.number)")
+                            Text(verbatim: "#\(primary.number)")
                                 .font(.caption2)
                         }
                         .foregroundStyle(.purple)
                     }
-                    if let threads = pr.unresolvedThreads, threads > 0 {
+                    if card.link.prLinks.count > 1 {
+                        Text(verbatim: "+\(card.link.prLinks.count - 1)")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                    let totalThreads = card.link.prLinks.compactMap(\.unresolvedThreads).reduce(0, +)
+                    if totalThreads > 0 {
                         HStack(spacing: 1) {
                             Image(systemName: "bubble.left.and.exclamationmark.bubble.right")
                                 .font(.system(size: 8))
-                            Text(verbatim: "\(threads)")
+                            Text(verbatim: "\(totalThreads)")
                                 .font(.system(size: 9, weight: .medium))
                         }
                         .foregroundStyle(.orange)
@@ -152,7 +165,7 @@ struct CardView: View {
                 Label("Copy Resume Command", systemImage: "doc.on.doc")
             }
             Divider()
-            if let pr = card.link.prLink {
+            ForEach(card.link.prLinks, id: \.number) { pr in
                 Button {
                     if let url = pr.url.flatMap({ URL(string: $0) }) {
                         NSWorkspace.shared.open(url)

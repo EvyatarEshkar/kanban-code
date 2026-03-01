@@ -17,10 +17,22 @@ public struct SessionLink: Codable, Sendable, Equatable {
 
 /// Link to a tmux terminal session.
 public struct TmuxLink: Codable, Sendable, Equatable {
-    public var sessionName: String
+    public var sessionName: String          // Primary Claude session
+    public var extraSessions: [String]?     // User-created shell terminals
 
-    public init(sessionName: String) {
+    /// All session names (primary + extras).
+    public var allSessionNames: [String] {
+        var result = [sessionName]
+        if let extra = extraSessions { result.append(contentsOf: extra) }
+        return result
+    }
+
+    /// Total count of terminals.
+    public var terminalCount: Int { allSessionNames.count }
+
+    public init(sessionName: String, extraSessions: [String]? = nil) {
         self.sessionName = sessionName
+        self.extraSessions = extraSessions
     }
 }
 
@@ -116,11 +128,24 @@ public struct Link: Identifiable, Codable, Sendable {
     public var sessionLink: SessionLink?
     public var tmuxLink: TmuxLink?
     public var worktreeLink: WorktreeLink?
-    public var prLink: PRLink?
+    public var prLinks: [PRLink]
     public var issueLink: IssueLink?
+
+    /// Branches discovered by scanning the conversation for `git push` commands.
+    /// nil = not yet scanned; empty = scanned but no branches found.
+    public var discoveredBranches: [String]?
 
     /// Whether this card's project is configured for remote execution.
     public var isRemote: Bool
+
+    // MARK: - Multi-PR computed properties
+
+    /// Primary PR (first in array, or nil). Backward-compat shorthand.
+    public var prLink: PRLink? { prLinks.first }
+    /// Worst PR status across all PRs (highest urgency).
+    public var worstPRStatus: PRStatus? { prLinks.compactMap(\.status).min() }
+    /// True if ALL PRs are merged or closed.
+    public var allPRsDone: Bool { !prLinks.isEmpty && prLinks.allSatisfy { $0.status == .merged || $0.status == .closed } }
 
     // MARK: - Backward-compat computed properties
 
@@ -136,8 +161,8 @@ public struct Link: Identifiable, Codable, Sendable {
     public var worktreeBranch: String? { worktreeLink?.branch }
     /// GitHub issue number. Use `issueLink?.number` for new code.
     public var githubIssue: Int? { issueLink?.number }
-    /// GitHub PR number. Use `prLink?.number` for new code.
-    public var githubPR: Int? { prLink?.number }
+    /// GitHub PR number. Use `prLinks.first?.number` for new code.
+    public var githubPR: Int? { prLinks.first?.number }
     /// Session display number. Use `sessionLink?.sessionNumber` for new code.
     public var sessionNumber: Int? { sessionLink?.sessionNumber }
     /// Issue body or manual prompt. Use `issueLink?.body ?? promptBody` for new code.
@@ -148,7 +173,7 @@ public struct Link: Identifiable, Codable, Sendable {
         if sessionLink != nil { return .session }
         if worktreeLink != nil { return .worktree }
         if issueLink != nil { return .issue }
-        if prLink != nil { return .pr }
+        if !prLinks.isEmpty { return .pr }
         return .task
     }
 
@@ -169,9 +194,10 @@ public struct Link: Identifiable, Codable, Sendable {
         sessionLink: SessionLink? = nil,
         tmuxLink: TmuxLink? = nil,
         worktreeLink: WorktreeLink? = nil,
-        prLink: PRLink? = nil,
+        prLinks: [PRLink] = [],
         issueLink: IssueLink? = nil,
-        isRemote: Bool = false
+        isRemote: Bool = false,
+        discoveredBranches: [String]? = nil
     ) {
         self.id = id
         self.name = name
@@ -187,9 +213,10 @@ public struct Link: Identifiable, Codable, Sendable {
         self.sessionLink = sessionLink
         self.tmuxLink = tmuxLink
         self.worktreeLink = worktreeLink
-        self.prLink = prLink
+        self.prLinks = prLinks
         self.issueLink = issueLink
         self.isRemote = isRemote
+        self.discoveredBranches = discoveredBranches
     }
 
     // MARK: - Backward-compatible Codable
@@ -198,9 +225,11 @@ public struct Link: Identifiable, Codable, Sendable {
         // Card-level
         case id, name, projectPath, column, createdAt, updatedAt, lastActivity
         case manualOverrides, manuallyArchived, source, promptBody, isRemote
+        case discoveredBranches
         // Typed links (new nested format)
-        case sessionLink, tmuxLink, worktreeLink, prLink, issueLink
-        // Old flat keys (for reading legacy format)
+        case sessionLink, tmuxLink, worktreeLink, prLinks, issueLink
+        // Old format keys (for reading legacy format)
+        case prLink
         case sessionId, sessionPath, worktreePath, worktreeBranch
         case tmuxSession, githubIssue, githubPR, sessionNumber, issueBody
     }
@@ -220,6 +249,7 @@ public struct Link: Identifiable, Codable, Sendable {
         source = try c.decodeIfPresent(LinkSource.self, forKey: .source) ?? .discovered
         promptBody = try c.decodeIfPresent(String.self, forKey: .promptBody)
         isRemote = try c.decodeIfPresent(Bool.self, forKey: .isRemote) ?? false
+        discoveredBranches = try c.decodeIfPresent([String].self, forKey: .discoveredBranches)
 
         // Session link: try nested first, fallback to flat
         if let sl = try c.decodeIfPresent(SessionLink.self, forKey: .sessionLink) {
@@ -255,13 +285,15 @@ public struct Link: Identifiable, Codable, Sendable {
             }
         }
 
-        // PR link
-        if let pl = try c.decodeIfPresent(PRLink.self, forKey: .prLink) {
-            prLink = pl
+        // PR links: try array first, fallback to singular prLink, fallback to legacy githubPR
+        if let pls = try c.decodeIfPresent([PRLink].self, forKey: .prLinks) {
+            prLinks = pls
+        } else if let pl = try c.decodeIfPresent(PRLink.self, forKey: .prLink) {
+            prLinks = [pl]
         } else if let pn = try c.decodeIfPresent(Int.self, forKey: .githubPR) {
-            prLink = PRLink(number: pn)
+            prLinks = [PRLink(number: pn)]
         } else {
-            prLink = nil
+            prLinks = []
         }
 
         // Issue link
@@ -294,12 +326,15 @@ public struct Link: Identifiable, Codable, Sendable {
         try c.encode(source, forKey: .source)
         try c.encodeIfPresent(promptBody, forKey: .promptBody)
         try c.encode(isRemote, forKey: .isRemote)
+        try c.encodeIfPresent(discoveredBranches, forKey: .discoveredBranches)
 
         // Always write new nested format
         try c.encodeIfPresent(sessionLink, forKey: .sessionLink)
         try c.encodeIfPresent(tmuxLink, forKey: .tmuxLink)
         try c.encodeIfPresent(worktreeLink, forKey: .worktreeLink)
-        try c.encodeIfPresent(prLink, forKey: .prLink)
+        if !prLinks.isEmpty {
+            try c.encode(prLinks, forKey: .prLinks)
+        }
         try c.encodeIfPresent(issueLink, forKey: .issueLink)
     }
 }

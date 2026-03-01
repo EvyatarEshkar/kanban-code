@@ -60,6 +60,11 @@ public enum JsonlParser {
                 metadata.projectPath = cwd
             }
 
+            // Extract git branch
+            if metadata.gitBranch == nil, let branch = obj["gitBranch"] as? String {
+                metadata.gitBranch = branch
+            }
+
             if type == "user" || type == "assistant" {
                 metadata.messageCount += 1
             }
@@ -102,6 +107,67 @@ public enum JsonlParser {
         }
 
         return nil
+    }
+
+    /// Scan a session JSONL for branches that were pushed to a remote.
+    /// Looks for `git push` commands in Bash tool_use blocks and `gh pr create` output.
+    /// Returns deduplicated branch names (excluding main/master).
+    public static func extractPushedBranches(from filePath: String) async throws -> [String] {
+        guard FileManager.default.fileExists(atPath: filePath) else { return [] }
+
+        let url = URL(fileURLWithPath: filePath)
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+
+        // Regex: git push [flags...] origin|upstream <branch>
+        let pushRegex = /git\s+push\s+(?:-[^\s]+\s+)*(?:origin|upstream)\s+(\S+)/
+        var branches = Set<String>()
+
+        for try await line in handle.bytes.lines {
+            guard !line.isEmpty else { continue }
+
+            // Only parse lines that might contain tool_use (Bash commands) or tool_result
+            guard line.contains("\"tool_use\"") || line.contains("\"tool_result\"") else { continue }
+
+            guard let data = line.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let message = obj["message"] as? [String: Any],
+                  let content = message["content"] as? [[String: Any]] else {
+                continue
+            }
+
+            for block in content {
+                let blockType = block["type"] as? String
+
+                // Check Bash tool_use for git push commands
+                if blockType == "tool_use",
+                   block["name"] as? String == "Bash",
+                   let input = block["input"] as? [String: Any],
+                   let command = input["command"] as? String {
+                    for match in command.matches(of: pushRegex) {
+                        let branch = String(match.output.1)
+                        if branch != "main" && branch != "master" && !branch.hasPrefix("-") {
+                            branches.insert(branch)
+                        }
+                    }
+                }
+
+                // Check tool_result for gh pr create output (GitHub PR URLs)
+                // These appear as text in tool_result content after gh pr create
+                if blockType == "tool_result",
+                   let resultContent = block["content"] as? [[String: Any]] {
+                    for sub in resultContent {
+                        if let text = sub["text"] as? String,
+                           text.contains("github.com/") && text.contains("/pull/") {
+                            // Already have the PR URL — branch will be matched via gh pr list
+                            // No action needed here, the PR is discovered via batch fetch
+                        }
+                    }
+                }
+            }
+        }
+
+        return Array(branches).sorted()
     }
 
     /// Decode a Claude projects directory name to a filesystem path.

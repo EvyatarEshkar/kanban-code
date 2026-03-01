@@ -1,27 +1,25 @@
 import Foundation
+import UserNotifications
 
-/// Sends notifications via macOS native notification center using osascript.
+/// Sends notifications via macOS UNUserNotificationCenter.
 /// Always available as a fallback when Pushover is not configured.
 public final class MacOSNotificationClient: NotifierPort, @unchecked Sendable {
 
     public init() {}
 
     public func sendNotification(title: String, message: String, imageData: Data?) async throws {
-        let escapedTitle = title.replacingOccurrences(of: "\"", with: "\\\"")
-        let escapedMessage = message.replacingOccurrences(of: "\"", with: "\\\"")
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = message
+        content.sound = .default
 
-        let script = """
-        display notification "\(escapedMessage)" with title "\(escapedTitle)" sound name "default"
-        """
-
-        let result = try await ShellCommand.run(
-            "/usr/bin/osascript",
-            arguments: ["-e", script]
+        let request = UNNotificationRequest(
+            identifier: UUID().uuidString,
+            content: content,
+            trigger: nil  // Deliver immediately
         )
 
-        guard result.succeeded else {
-            throw NotificationError.macOSNotificationFailed
-        }
+        try await UNUserNotificationCenter.current().add(request)
     }
 
     public func isConfigured() -> Bool {

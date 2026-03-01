@@ -106,6 +106,37 @@ Feature: Remote Execution
     Then the card should show a "local (fallback)" badge in yellow
     And a tooltip should explain the remote is unavailable
 
+  # ── Launch Dialog Remote Checkbox ──
+
+  Scenario: Run remotely checkbox in launch dialog
+    Given remote execution is configured for the project
+    When the launch confirmation dialog appears
+    Then "Run remotely" should be checked by default
+    And the command preview should show the SHELL override and KANBAN_* env vars
+    When I uncheck "Run remotely"
+    Then the command preview should show a plain claude command
+    And launching should run Claude locally without remote shell
+
+  Scenario: Run remotely checkbox disabled without config
+    Given remote execution is NOT configured for the project
+    When the launch confirmation dialog appears
+    Then "Run remotely" should be disabled and unchecked
+    And a tooltip should explain "Configure remote execution in project settings"
+    And the command preview should show a plain claude command
+
+  Scenario: Run remotely preference persists across launches
+    Given I unchecked "Run remotely" in a previous launch
+    When I open the launch dialog again
+    Then "Run remotely" should still be unchecked
+    Because it is persisted via @AppStorage("runRemotely")
+
+  Scenario: New task dialog also shows Run remotely
+    Given "Start immediately" is checked in the new task dialog
+    And the selected project has remoteConfig
+    Then the "Run remotely" checkbox should be enabled
+    And the command preview should show remote env vars
+    And clicking "Create & Start" launches with remote shell directly
+
   # ── Edge Cases ──
 
   Scenario: Remote not configured for a project

@@ -195,11 +195,21 @@ Feature: Card Lifecycle and Automation
 
   # ── In Review → Done ──
 
-  Scenario: PR is merged
-    Given a card is in "In Review" for PR #42
-    When the PR is merged on GitHub
+  Scenario: Single PR merged moves card to Done
+    Given a card is in "In Review" with one PR (#42)
+    When PR #42 is merged on GitHub
     And the background process detects the merge via `gh`
     Then the card should move to "Done"
+
+  Scenario: All PRs merged moves card to Done
+    Given a card is in "In Review" with PRs #42 and #43
+    When both PRs are merged on GitHub
+    Then the card should move to "Done"
+
+  Scenario: Partial PR merge keeps card in In Review
+    Given a card is in "In Review" with PRs #42 (merged) and #43 (open)
+    Then the card should remain in "In Review"
+    Because not all PRs are complete
 
   Scenario: PR is closed without merge
     Given a card is in "In Review" for PR #42

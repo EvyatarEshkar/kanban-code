@@ -204,12 +204,11 @@ public final class BoardState: @unchecked Sendable {
     }
 
     /// Delete a card permanently (manual tasks or orphan cards with no active links).
-    public func deleteCard(cardId: String) {
-        guard let index = cards.firstIndex(where: { $0.id == cardId }) else { return }
-        let card = cards[index]
-        let isManual = card.link.source == .manual
-        let isOrphan = card.link.sessionLink == nil && card.link.tmuxLink == nil && card.link.worktreeLink == nil
-        guard isManual || isOrphan else { return }
+    /// Delete a card, removing it from the board and coordination store.
+    /// Returns the link for cleanup (tmux kill, jsonl delete) by the caller.
+    @discardableResult
+    public func deleteCard(cardId: String) -> Link? {
+        guard let index = cards.firstIndex(where: { $0.id == cardId }) else { return nil }
         let link = cards[index].link
         cards.remove(at: index)
         if selectedCardId == cardId { selectedCardId = nil }
@@ -217,6 +216,7 @@ public final class BoardState: @unchecked Sendable {
         Task {
             try? await coordinationStore.removeLink(id: link.id)
         }
+        return link
     }
 
     /// Move a card to a different column (manual override — e.g. user drag).
@@ -258,7 +258,7 @@ public final class BoardState: @unchecked Sendable {
         var link = cards[index].link
         switch linkType {
         case .pr:
-            link.prLink = nil
+            link.prLinks = []
             link.manualOverrides.prLink = true
         case .issue:
             link.issueLink = nil

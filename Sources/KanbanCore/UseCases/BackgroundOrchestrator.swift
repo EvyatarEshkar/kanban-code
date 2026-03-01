@@ -55,6 +55,48 @@ public final class BackgroundOrchestrator: @unchecked Sendable {
         self.notifier = newNotifier
     }
 
+    /// Force re-scan a card's conversation for pushed branches and re-fetch PRs.
+    /// Used by the UI "Discover" button to manually trigger discovery for older cards.
+    public func discoverBranchesForCard(cardId: String) async {
+        do {
+            var links = try await coordinationStore.readLinks()
+            guard let idx = links.firstIndex(where: { $0.id == cardId }),
+                  let sessionPath = links[idx].sessionLink?.sessionPath else { return }
+
+            // Force rescan by clearing cached value
+            links[idx].discoveredBranches = nil
+            let scanned = (try? await JsonlParser.extractPushedBranches(from: sessionPath)) ?? []
+            links[idx].discoveredBranches = scanned
+
+            // Re-fetch PRs to match newly discovered branches
+            if let prTracker, let projectPath = links[idx].projectPath {
+                var allPRs: [String: PullRequest] = [:]
+                if var prs = try? await prTracker.fetchPRs(repoRoot: projectPath) {
+                    try? await prTracker.enrichPRDetails(repoRoot: projectPath, prs: &prs)
+                    allPRs = prs
+                }
+
+                let branches = [links[idx].worktreeLink?.branch].compactMap { $0 } + scanned
+                for branch in branches {
+                    if let pr = allPRs[branch],
+                       !links[idx].prLinks.contains(where: { $0.number == pr.number }) {
+                        links[idx].prLinks.append(PRLink(
+                            number: pr.number, url: pr.url,
+                            status: pr.status, title: pr.title,
+                            approvalCount: pr.approvalCount > 0 ? pr.approvalCount : nil,
+                            checkRuns: pr.checkRuns.isEmpty ? nil : pr.checkRuns
+                        ))
+                    }
+                }
+            }
+
+            links[idx].updatedAt = .now
+            try await coordinationStore.writeLinks(links)
+        } catch {
+            // Best-effort
+        }
+    }
+
     /// Stop the background polling loop.
     public func stop() {
         pollingTask?.cancel()
@@ -186,23 +228,61 @@ public final class BackgroundOrchestrator: @unchecked Sendable {
             for i in links.indices {
                 guard let sessionId = links[i].sessionLink?.sessionId else { continue }
                 let activityState = await activityDetector.activityState(for: sessionId)
-                let pr = links[i].worktreeLink?.branch.flatMap { allPRs[$0] }
                 let hasWorktree = links[i].worktreeLink?.branch != nil
-                let hasTmux = links[i].tmuxLink.map { tmuxNames.contains($0.sessionName) } ?? false
+                let hasTmux = links[i].tmuxLink.map { tmux in
+                    tmux.allSessionNames.contains(where: { tmuxNames.contains($0) })
+                } ?? false
 
-                // Sync PR enrichment data to prLink
-                if let pr {
-                    if links[i].prLink == nil {
-                        links[i].prLink = PRLink(number: pr.number, url: pr.url)
+                // Sync PR enrichment data to prLinks (multi-branch)
+                let branches = [links[i].worktreeLink?.branch].compactMap { $0 }
+                    + (links[i].discoveredBranches ?? [])
+                let matchedPRs = branches.compactMap { allPRs[$0] }
+                for pr in matchedPRs {
+                    if let idx = links[i].prLinks.firstIndex(where: { $0.number == pr.number }) {
+                        // Update existing
+                        links[i].prLinks[idx].url = pr.url
+                        links[i].prLinks[idx].status = pr.status
+                        links[i].prLinks[idx].title = pr.title
+                        links[i].prLinks[idx].unresolvedThreads = pr.unresolvedThreads > 0 ? pr.unresolvedThreads : nil
+                        links[i].prLinks[idx].approvalCount = pr.approvalCount > 0 ? pr.approvalCount : nil
+                        links[i].prLinks[idx].checkRuns = pr.checkRuns.isEmpty ? nil : pr.checkRuns
+                    } else {
+                        // Add new
+                        links[i].prLinks.append(PRLink(
+                            number: pr.number,
+                            url: pr.url,
+                            status: pr.status,
+                            title: pr.title,
+                            approvalCount: pr.approvalCount > 0 ? pr.approvalCount : nil,
+                            checkRuns: pr.checkRuns.isEmpty ? nil : pr.checkRuns
+                        ))
                     }
-                    links[i].prLink?.url = pr.url
-                    links[i].prLink?.status = pr.status
-                    links[i].prLink?.title = pr.title
-                    links[i].prLink?.unresolvedThreads = pr.unresolvedThreads > 0 ? pr.unresolvedThreads : nil
-                    links[i].prLink?.approvalCount = pr.approvalCount > 0 ? pr.approvalCount : nil
-                    links[i].prLink?.checkRuns = pr.checkRuns.isEmpty ? nil : pr.checkRuns
                     // body is NOT synced here — lazy-loaded on demand via fetchPRBody
                     changed = true
+                }
+
+                // Conversation branch scan for recent sessions without discoveredBranches
+                if links[i].discoveredBranches == nil,
+                   let path = links[i].sessionLink?.sessionPath {
+                    let activity = links[i].lastActivity ?? links[i].updatedAt
+                    let isRecent = activity.timeIntervalSinceNow > -86400 // 24h
+                    if isRecent {
+                        let scanned = (try? await JsonlParser.extractPushedBranches(from: path)) ?? []
+                        links[i].discoveredBranches = scanned
+                        if !scanned.isEmpty {
+                            // Re-match PRs with newly discovered branches
+                            for branch in scanned {
+                                if let pr = allPRs[branch],
+                                   !links[i].prLinks.contains(where: { $0.number == pr.number }) {
+                                    links[i].prLinks.append(PRLink(
+                                        number: pr.number, url: pr.url,
+                                        status: pr.status, title: pr.title
+                                    ))
+                                }
+                            }
+                        }
+                        changed = true
+                    }
                 }
 
                 // Clear manual column override when we have definitive activity data
@@ -223,7 +303,6 @@ public final class BackgroundOrchestrator: @unchecked Sendable {
                 UpdateCardColumn.update(
                     link: &links[i],
                     activityState: activityState,
-                    pr: pr,
                     hasWorktree: hasWorktree || hasTmux
                 )
 

@@ -7,14 +7,21 @@ Feature: PR Tracking
     Given the Kanban application is running
     And `gh` CLI is installed and authenticated
 
-  # ── PR Discovery ──
-  # (Learned from git-orchard: batch fetch, branch name as key)
+  # ── PR Discovery (Multi-Branch) ──
+  # PRs are discovered from worktreeLink.branch AND discoveredBranches.
+  # A card can have multiple PRs (prLinks array).
 
-  Scenario: Discovering PRs via branch name
+  Scenario: Discovering PRs via worktree branch name
     Given a session is linked to worktree on branch "feat/issue-123"
     When the background process fetches PRs via `gh pr list`
     Then it should match the PR by headRefName == "feat/issue-123"
-    And the PR should be linked to the session card
+    And the PR should be appended to the card's prLinks array
+
+  Scenario: Discovering PRs via conversation-scanned branches
+    Given a card has discoveredBranches = ["feat/trace-discovery", "docs/judge-docs"]
+    When the background process fetches PRs
+    Then PRs matching either branch should be linked to the card
+    And prLinks should contain entries for both branches
 
   Scenario: Batch PR fetching
     When the background process checks for PRs
@@ -127,6 +134,38 @@ Feature: PR Tracking
     Then both types should be aggregated
     And any failure from either type should show as "failing"
 
+  # ── Multi-PR Display and Column Semantics ──
+
+  Scenario: Card with multiple PRs shows worst-status badge
+    Given a card has prLinks with PRs #240 (approved) and #242 (failing)
+    Then the card badge should show "failing" (worst status wins)
+    And a "+1" indicator should show there are additional PRs
+
+  Scenario: Card property rows show all PRs
+    Given a card has prLinks with PRs #240 and #242
+    Then the detail header should show two PR property rows
+    And each row should be clickable to open in browser
+
+  Scenario: PR tab shows all PRs when multiple exist
+    Given a card has prLinks with 2 PRs
+    When I open the Pull Request tab
+    Then both PRs should be displayed with individual status, checks, and badges
+
+  Scenario: Card moves to In Review when any PR exists
+    Given a card has at least one entry in prLinks
+    And the session is idle (not actively working)
+    Then the card should be in "In Review"
+
+  Scenario: Card moves to Done only when ALL PRs are merged/closed
+    Given a card has prLinks with PRs #240 (merged) and #242 (open)
+    Then the card should remain in "In Review"
+    When PR #242 is also merged
+    Then the card should move to "Done"
+
+  Scenario: Single PR merged moves card to Done
+    Given a card has only one PR in prLinks and it is merged
+    Then the card should move to "Done"
+
   # ── Edge Cases ──
 
   Scenario: PR from sub-repo
@@ -136,10 +175,11 @@ Feature: PR Tracking
     Then the PR should still be discovered
     Because the worktree branch is on the repoRoot
 
-  Scenario: Multiple PRs for same branch
+  Scenario: Multiple PRs for same branch (open wins in batch fetch)
     Given branch "feat/login" has 2 PRs (one closed, one open)
-    Then the open PR should take priority
-    And the closed PR should be ignored in the active display
+    When `gh pr list` returns both
+    Then the open PR should take priority in the branch→PR map
+    And only the open PR should be linked to the card
 
   Scenario: gh CLI unavailable
     Given `gh` is not installed

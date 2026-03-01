@@ -51,8 +51,10 @@ public enum CardReconciler {
             if let sid = link.sessionLink?.sessionId {
                 cardIdBySessionId[sid] = link.id
             }
-            if let tmux = link.tmuxLink?.sessionName {
-                cardIdByTmuxName[tmux] = link.id
+            if let tmux = link.tmuxLink {
+                for name in tmux.allSessionNames {
+                    cardIdByTmuxName[name] = link.id
+                }
             }
             if let branch = link.worktreeLink?.branch {
                 cardIdsByBranch[branch, default: []].append(link.id)
@@ -111,6 +113,7 @@ public enum CardReconciler {
 
         // B. Match worktrees to existing cards
         let liveTmuxNames = Set(snapshot.tmuxSessions.map(\.name))
+        let didScanTmux = !snapshot.tmuxSessions.isEmpty
         var liveWorktreePaths: Set<String> = []
         let didScanWorktrees = !snapshot.worktrees.isEmpty
 
@@ -151,7 +154,9 @@ public enum CardReconciler {
             let cardIds = cardIdsByBranch[branch] ?? []
             for cardId in cardIds {
                 if var link = linksById[cardId] {
-                    link.prLink = PRLink(number: pr.number, url: pr.url)
+                    if !link.prLinks.contains(where: { $0.number == pr.number }) {
+                        link.prLinks.append(PRLink(number: pr.number, url: pr.url))
+                    }
                     linksById[cardId] = link
                 }
             }
@@ -162,11 +167,25 @@ public enum CardReconciler {
             var changed = false
 
             // Clear dead tmux links (tmux session no longer exists)
-            if let tmuxName = link.tmuxLink?.sessionName,
-               !link.manualOverrides.tmuxSession,
-               !liveTmuxNames.contains(tmuxName) {
-                link.tmuxLink = nil
-                changed = true
+            // Only clear if we actually scanned tmux (avoid clearing when snapshot has no tmux data)
+            if var tmux = link.tmuxLink, !link.manualOverrides.tmuxSession, didScanTmux {
+                let primaryAlive = liveTmuxNames.contains(tmux.sessionName)
+
+                // Filter dead extra sessions
+                if let extras = tmux.extraSessions {
+                    let liveExtras = extras.filter { liveTmuxNames.contains($0) }
+                    tmux.extraSessions = liveExtras.isEmpty ? nil : liveExtras
+                }
+
+                if !primaryAlive && tmux.extraSessions == nil {
+                    // Both primary and all extras dead
+                    link.tmuxLink = nil
+                    changed = true
+                } else if tmux != link.tmuxLink {
+                    // Something changed (dead extras filtered, or primary died but extras alive)
+                    link.tmuxLink = tmux
+                    changed = true
+                }
             }
 
             // Clear dead worktree links (path no longer exists on disk)

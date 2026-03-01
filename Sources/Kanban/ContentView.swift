@@ -16,6 +16,10 @@ struct ContentView: View {
     @State private var launchPrompt: String = ""
     @State private var launchProjectPath: String = ""
     @State private var launchWorktreeName: String?
+    @State private var launchHasExistingWorktree = false
+    @State private var launchIsGitRepo = false
+    @State private var launchHasRemoteConfig = false
+    @State private var launchRemoteHost: String?
     @State private var syncStatuses: [String: SyncStatus] = [:]
     @State private var isSyncRefreshing = false
     @AppStorage("selectedProject") private var selectedProjectPersisted: String = ""
@@ -110,7 +114,8 @@ struct ContentView: View {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(cmd, forType: .string)
             },
-            onRefreshBacklog: { Task { await boardState.refreshBacklog() } }
+            onRefreshBacklog: { Task { await boardState.refreshBacklog() } },
+            onNewTask: { showNewTask = true }
         )
             .ignoresSafeArea(edges: .top)
             .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
@@ -139,7 +144,19 @@ struct ContentView: View {
                             Task { await cleanupWorktree(cardId: card.id) }
                         },
                         onDeleteCard: {
-                            boardState.deleteCard(cardId: card.id)
+                            deleteCardWithCleanup(cardId: card.id)
+                        },
+                        onCreateTerminal: {
+                            createExtraTerminal(cardId: card.id)
+                        },
+                        onKillTerminal: { sessionName in
+                            killExtraTerminal(cardId: card.id, sessionName: sessionName)
+                        },
+                        onDiscover: {
+                            Task {
+                                await orchestrator.discoverBranchesForCard(cardId: card.id)
+                                await boardState.refresh()
+                            }
                         }
                     )
                     .inspectorColumnWidth(min: 600, ideal: 800, max: 1000)
@@ -177,10 +194,14 @@ struct ContentView: View {
                 NewTaskDialog(
                     isPresented: $showNewTask,
                     projects: boardState.configuredProjects,
-                    defaultProjectPath: boardState.selectedProjectPath
-                ) { prompt, projectPath, startImmediately in
-                    createManualTask(prompt: prompt, projectPath: projectPath, startImmediately: startImmediately)
-                }
+                    defaultProjectPath: boardState.selectedProjectPath,
+                    onCreate: { prompt, projectPath, title, startImmediately in
+                        createManualTask(prompt: prompt, projectPath: projectPath, title: title, startImmediately: startImmediately)
+                    },
+                    onCreateAndLaunch: { prompt, projectPath, title, createWorktree, runRemotely in
+                        createManualTaskAndLaunch(prompt: prompt, projectPath: projectPath, title: title, createWorktree: createWorktree, runRemotely: runRemotely)
+                    }
+                )
             }
             .sheet(isPresented: $showAddFromPath) {
                 addFromPathSheet
@@ -191,12 +212,15 @@ struct ContentView: View {
                     projectPath: launchProjectPath,
                     initialPrompt: launchPrompt,
                     worktreeName: launchWorktreeName,
+                    hasExistingWorktree: launchHasExistingWorktree,
+                    isGitRepo: launchIsGitRepo,
+                    hasRemoteConfig: launchHasRemoteConfig,
+                    remoteHost: launchRemoteHost,
                     isPresented: $showLaunchConfirmation
-                ) { editedPrompt, createWorktree in
+                ) { editedPrompt, createWorktree, runRemotely in
                     if let cardId = launchCardId {
-                        // When createWorktree is checked but no explicit name, pass "" for auto-generation
                         let wtName: String? = createWorktree ? (launchWorktreeName ?? "") : nil
-                        executeLaunch(cardId: cardId, prompt: editedPrompt, projectPath: launchProjectPath, worktreeName: wtName)
+                        executeLaunch(cardId: cardId, prompt: editedPrompt, projectPath: launchProjectPath, worktreeName: wtName, runRemotely: runRemotely)
                     }
                 }
             }
@@ -756,10 +780,15 @@ struct ContentView: View {
         }
     }
 
-    private func createManualTask(prompt: String, projectPath: String?, startImmediately: Bool = false) {
+    private func createManualTask(prompt: String, projectPath: String?, title: String? = nil, startImmediately: Bool = false) {
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        let firstLine = trimmed.components(separatedBy: .newlines).first ?? trimmed
-        let name = String(firstLine.prefix(100))
+        let name: String
+        if let title, !title.isEmpty {
+            name = String(title.prefix(100))
+        } else {
+            let firstLine = trimmed.components(separatedBy: .newlines).first ?? trimmed
+            name = String(firstLine.prefix(100))
+        }
         let link = Link(
             name: name,
             projectPath: projectPath,
@@ -774,6 +803,40 @@ struct ContentView: View {
             if startImmediately {
                 startCard(cardId: linkId)
             }
+        }
+    }
+
+    /// Create a manual task and launch it directly, bypassing the LaunchConfirmationDialog.
+    private func createManualTaskAndLaunch(prompt: String, projectPath: String?, title: String? = nil, createWorktree: Bool, runRemotely: Bool) {
+        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name: String
+        if let title, !title.isEmpty {
+            name = String(title.prefix(100))
+        } else {
+            let firstLine = trimmed.components(separatedBy: .newlines).first ?? trimmed
+            name = String(firstLine.prefix(100))
+        }
+        let link = Link(
+            name: name,
+            projectPath: projectPath,
+            column: .inProgress,
+            source: .manual,
+            promptBody: trimmed
+        )
+        let linkId = link.id
+        let effectivePath = projectPath ?? NSHomeDirectory()
+        Task {
+            try? await coordinationStore.upsertLink(link)
+            await boardState.refresh()
+
+            // Build prompt using PromptBuilder
+            let settings = try? await settingsStore.read()
+            let project = settings?.projects.first(where: { $0.path == effectivePath })
+            guard let card = boardState.cards.first(where: { $0.id == linkId }) else { return }
+            let builtPrompt = PromptBuilder.buildPrompt(card: card.link, project: project, settings: settings)
+
+            let wtName: String? = createWorktree ? "" : nil
+            executeLaunch(cardId: linkId, prompt: builtPrompt, projectPath: effectivePath, worktreeName: wtName, runRemotely: runRemotely)
         }
     }
 
@@ -793,7 +856,11 @@ struct ContentView: View {
         Task {
             let settings = try? await settingsStore.read()
             let project = settings?.projects.first(where: { $0.path == (card.link.projectPath ?? effectivePath) })
-            let prompt = PromptBuilder.buildPrompt(card: card.link, project: project, settings: settings)
+            var prompt = PromptBuilder.buildPrompt(card: card.link, project: project, settings: settings)
+            // Fallback: if builder returns empty, use promptBody or card name directly
+            if prompt.isEmpty {
+                prompt = card.link.promptBody ?? card.link.name ?? ""
+            }
 
             // Determine worktree name
             let worktreeName: String?
@@ -806,18 +873,36 @@ struct ContentView: View {
                 worktreeName = nil
             }
 
+            // Detect git repo and remote config for dialog
+            let isGitRepo = FileManager.default.fileExists(
+                atPath: (effectivePath as NSString).appendingPathComponent(".git")
+            )
+
             // Show launch confirmation dialog
             launchCardId = cardId
             launchPrompt = prompt
             launchProjectPath = effectivePath
             launchWorktreeName = worktreeName
+            launchHasExistingWorktree = card.link.worktreeLink != nil
+            launchIsGitRepo = isGitRepo
+            launchHasRemoteConfig = project?.remoteConfig != nil
+            launchRemoteHost = project?.remoteConfig?.host
             showLaunchConfirmation = true
         }
     }
 
-    private func executeLaunch(cardId: String, prompt: String, projectPath: String, worktreeName: String?) {
+    private func executeLaunch(cardId: String, prompt: String, projectPath: String, worktreeName: String?, runRemotely: Bool = true) {
         Task {
             do {
+                // Pre-set tmuxLink BEFORE launching to prevent duplicate card creation.
+                // The reconciler matches discovered sessions to cards via tmuxLink + projectPath,
+                // so this must be set before any background refresh can race.
+                let predictedTmuxName = LaunchSession.tmuxSessionName(project: projectPath, worktree: worktreeName)
+                try? await coordinationStore.updateLink(id: cardId) { @Sendable link in
+                    link.tmuxLink = TmuxLink(sessionName: predictedTmuxName)
+                    link.column = .inProgress
+                }
+
                 // Resolve remote config from project settings
                 let settings = try? await settingsStore.read()
                 let project = settings?.projects.first(where: { $0.path == projectPath })
@@ -826,7 +911,7 @@ struct ContentView: View {
                 let extraEnv: [String: String]
                 let isRemote: Bool
 
-                if let project, project.remoteConfig != nil {
+                if runRemotely, let project, project.remoteConfig != nil {
                     // Deploy remote shell script and get override path
                     try? RemoteShellManager.deploy()
                     shellOverride = RemoteShellManager.shellOverridePath(for: project)
@@ -857,7 +942,7 @@ struct ContentView: View {
                     extraEnv: extraEnv
                 )
 
-                // Update the EXISTING link (by link.id) — no new link created
+                // Update with actual name (should match predicted) + remote flag
                 let remoteFlag = isRemote
                 try? await coordinationStore.updateLink(id: cardId) { @Sendable link in
                     link.tmuxLink = TmuxLink(sessionName: tmuxName)
@@ -867,6 +952,10 @@ struct ContentView: View {
                 boardState.setCardColumn(cardId: cardId, to: .inProgress)
                 await boardState.refresh()
             } catch {
+                // Clear tmuxLink on failure
+                try? await coordinationStore.updateLink(id: cardId) { @Sendable link in
+                    link.tmuxLink = nil
+                }
                 boardState.error = "Launch failed: \(error.localizedDescription)"
             }
         }
@@ -887,6 +976,76 @@ struct ContentView: View {
             await boardState.refresh()
         } catch {
             boardState.error = "Worktree cleanup failed: \(error.localizedDescription)"
+        }
+    }
+
+    // MARK: - Extra Terminals
+
+    private func createExtraTerminal(cardId: String) {
+        guard let card = boardState.cards.first(where: { $0.id == cardId }),
+              let tmux = card.link.tmuxLink else { return }
+
+        // Working directory: worktree > projectPath > home
+        let workDir: String
+        if let wtPath = card.link.worktreeLink?.path, !wtPath.isEmpty {
+            workDir = wtPath
+        } else {
+            workDir = card.link.projectPath ?? NSHomeDirectory()
+        }
+
+        // Next available shell number
+        let existing = tmux.extraSessions ?? []
+        let baseName = tmux.sessionName
+        var n = 1
+        while existing.contains("\(baseName)-sh\(n)") { n += 1 }
+        let newName = "\(baseName)-sh\(n)"
+
+        Task {
+            do {
+                let tmuxAdapter = TmuxAdapter()
+                try await tmuxAdapter.createSession(name: newName, path: workDir, command: nil)
+
+                try? await coordinationStore.updateLink(id: cardId) { @Sendable link in
+                    var sessions = link.tmuxLink?.extraSessions ?? []
+                    sessions.append(newName)
+                    link.tmuxLink?.extraSessions = sessions
+                }
+                await boardState.refresh()
+            } catch {
+                boardState.error = "Failed to create terminal: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func killExtraTerminal(cardId: String, sessionName: String) {
+        Task {
+            let tmuxAdapter = TmuxAdapter()
+            try? await tmuxAdapter.killSession(name: sessionName)
+
+            try? await coordinationStore.updateLink(id: cardId) { @Sendable link in
+                link.tmuxLink?.extraSessions?.removeAll { $0 == sessionName }
+                if link.tmuxLink?.extraSessions?.isEmpty == true {
+                    link.tmuxLink?.extraSessions = nil
+                }
+            }
+            await boardState.refresh()
+        }
+    }
+
+    private func deleteCardWithCleanup(cardId: String) {
+        guard let link = boardState.deleteCard(cardId: cardId) else { return }
+        Task {
+            let tmuxAdapter = TmuxAdapter()
+            // Kill all tmux sessions (primary + extras)
+            if let tmux = link.tmuxLink {
+                for name in tmux.allSessionNames {
+                    try? await tmuxAdapter.killSession(name: name)
+                }
+            }
+            // Delete the .jsonl session file
+            if let sessionPath = link.sessionLink?.sessionPath {
+                try? FileManager.default.removeItem(atPath: sessionPath)
+            }
         }
     }
 

@@ -9,7 +9,7 @@ public enum AssignColumn {
         link: Link,
         activityState: ActivityState? = nil,
         hasPR: Bool = false,
-        prMerged: Bool = false,
+        allPRsDone: Bool = false,
         hasWorktree: Bool = false
     ) -> KanbanColumn {
         // Manual override always wins
@@ -22,8 +22,8 @@ public enum AssignColumn {
             return .allSessions
         }
 
-        // PR merged → done
-        if prMerged {
+        // ALL PRs merged/closed → done
+        if allPRsDone {
             return .done
         }
 

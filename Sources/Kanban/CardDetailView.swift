@@ -17,6 +17,9 @@ struct CardDetailView: View {
     var onAddIssue: (Int) -> Void = { _ in }
     var onCleanupWorktree: () -> Void = {}
     var onDeleteCard: () -> Void = {}
+    var onCreateTerminal: () -> Void = {}
+    var onKillTerminal: (String) -> Void = { _ in }
+    var onDiscover: () -> Void = {}
 
     @State private var turns: [ConversationTurn] = []
     @State private var isLoadingHistory = false
@@ -55,9 +58,12 @@ struct CardDetailView: View {
     @State private var historyPollTask: Task<Void, Never>?
     @State private var lastReloadTime: Date = .distantPast
 
+    // Multi-terminal
+    @State private var selectedTerminalSession: String?
+
     let sessionStore: SessionStore
 
-    init(card: KanbanCard, sessionStore: SessionStore = ClaudeCodeSessionStore(), onResume: @escaping () -> Void = {}, onRename: @escaping (String) -> Void = { _ in }, onFork: @escaping () -> Void = {}, onDismiss: @escaping () -> Void = {}, onUnlink: @escaping (BoardState.LinkType) -> Void = { _ in }, onAddBranch: @escaping (String) -> Void = { _ in }, onAddIssue: @escaping (Int) -> Void = { _ in }, onCleanupWorktree: @escaping () -> Void = {}, onDeleteCard: @escaping () -> Void = {}) {
+    init(card: KanbanCard, sessionStore: SessionStore = ClaudeCodeSessionStore(), onResume: @escaping () -> Void = {}, onRename: @escaping (String) -> Void = { _ in }, onFork: @escaping () -> Void = {}, onDismiss: @escaping () -> Void = {}, onUnlink: @escaping (BoardState.LinkType) -> Void = { _ in }, onAddBranch: @escaping (String) -> Void = { _ in }, onAddIssue: @escaping (Int) -> Void = { _ in }, onCleanupWorktree: @escaping () -> Void = {}, onDeleteCard: @escaping () -> Void = {}, onCreateTerminal: @escaping () -> Void = {}, onKillTerminal: @escaping (String) -> Void = { _ in }, onDiscover: @escaping () -> Void = {}) {
         self.card = card
         self.sessionStore = sessionStore
         self.onResume = onResume
@@ -69,6 +75,9 @@ struct CardDetailView: View {
         self.onAddIssue = onAddIssue
         self.onCleanupWorktree = onCleanupWorktree
         self.onDeleteCard = onDeleteCard
+        self.onCreateTerminal = onCreateTerminal
+        self.onKillTerminal = onKillTerminal
+        self.onDiscover = onDiscover
         _selectedTab = State(initialValue: Self.initialTab(for: card))
     }
 
@@ -137,7 +146,7 @@ struct CardDetailView: View {
                     if let worktreePath = card.link.worktreeLink?.path, !worktreePath.isEmpty {
                         copyableRow(icon: "folder", text: worktreePath)
                     }
-                    if let pr = card.link.prLink {
+                    ForEach(card.link.prLinks, id: \.number) { pr in
                         let detail = pr.status.map { " · \($0.rawValue)" } ?? ""
                         let prURL = pr.url ?? githubBaseURL.map { GitRemoteResolver.prURL(base: $0, number: pr.number) }
                         linkPropertyRow(
@@ -201,7 +210,7 @@ struct CardDetailView: View {
                 if card.link.issueLink != nil {
                     Text("Issue").tag(DetailTab.issue)
                 }
-                if card.link.prLink != nil {
+                if !card.link.prLinks.isEmpty {
                     Text("Pull Request").tag(DetailTab.pullRequest)
                 }
                 if card.link.promptBody != nil && card.link.issueLink == nil {
@@ -247,6 +256,7 @@ struct CardDetailView: View {
             checkpointMode = false
             prBody = nil
             isLoadingPRBody = false
+            selectedTerminalSession = nil
             // Reset tab to a valid one for this card
             selectedTab = defaultTab(for: card)
             // Resolve GitHub base URL for constructing issue/PR links
@@ -322,9 +332,81 @@ struct CardDetailView: View {
 
     @ViewBuilder
     private var terminalView: some View {
-        if let tmuxSession = card.link.tmuxLink?.sessionName {
-            TerminalRepresentable.tmuxAttach(sessionName: tmuxSession)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        if let tmux = card.link.tmuxLink {
+            let allSessions = tmux.allSessionNames
+            let currentSession = selectedTerminalSession ?? tmux.sessionName
+
+            VStack(spacing: 0) {
+                // Terminal picker bar (only show if multiple terminals or to offer "+")
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 4) {
+                        ForEach(allSessions, id: \.self) { sessionName in
+                            let isPrimary = sessionName == tmux.sessionName
+                            let isSelected = sessionName == currentSession
+
+                            Button {
+                                selectedTerminalSession = sessionName
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: isPrimary ? "brain" : "terminal")
+                                        .font(.caption2)
+                                    Text(isPrimary ? "Claude" : sessionName.replacingOccurrences(
+                                        of: "\(tmux.sessionName)-", with: ""
+                                    ))
+                                    .font(.caption)
+                                    .lineLimit(1)
+
+                                    if !isPrimary {
+                                        Button {
+                                            onKillTerminal(sessionName)
+                                            if selectedTerminalSession == sessionName {
+                                                selectedTerminalSession = tmux.sessionName
+                                            }
+                                        } label: {
+                                            Image(systemName: "xmark")
+                                                .font(.system(size: 8, weight: .bold))
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        .buttonStyle(.borderless)
+                                    }
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(
+                                    isSelected ? Color.accentColor.opacity(0.15) : Color.clear,
+                                    in: RoundedRectangle(cornerRadius: 6)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        Button(action: onCreateTerminal) {
+                            Image(systemName: "plus")
+                                .font(.caption)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 4)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Open new terminal")
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                }
+
+                Divider()
+
+                TerminalRepresentable.tmuxAttach(sessionName: currentSession)
+                    .id(currentSession)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .onChange(of: card.link.tmuxLink) {
+                // Validate selection when terminals are added/killed
+                if let selected = selectedTerminalSession,
+                   let tmux = card.link.tmuxLink,
+                   !tmux.allSessionNames.contains(selected) {
+                    selectedTerminalSession = tmux.sessionName
+                }
+            }
         } else {
             VStack(spacing: 12) {
                 Image(systemName: "terminal")
@@ -346,7 +428,7 @@ struct CardDetailView: View {
         if card.link.tmuxLink != nil { return .terminal }
         if card.link.sessionLink != nil { return .history }
         if card.link.issueLink != nil { return .issue }
-        if card.link.prLink != nil { return .pullRequest }
+        if !card.link.prLinks.isEmpty { return .pullRequest }
         if card.link.promptBody != nil { return .prompt }
         return .history
     }
@@ -390,7 +472,7 @@ struct CardDetailView: View {
                     // Markdown body
                     if let body = issue.body, !body.isEmpty {
                         Markdown(body)
-                            .markdownTheme(.gitHub)
+                            .markdownTheme(.compact)
                             .textSelection(.enabled)
                     } else {
                         Text("No description provided.")
@@ -407,9 +489,11 @@ struct CardDetailView: View {
 
     @ViewBuilder
     private var prTabView: some View {
-        if let pr = card.link.prLink {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(Array(card.link.prLinks.enumerated()), id: \.element.number) { index, pr in
+                    if index > 0 { Divider().padding(.vertical, 4) }
+
                     // Header: title + number + badge + open button
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 2) {
@@ -437,8 +521,6 @@ struct CardDetailView: View {
                             .controlSize(.small)
                         }
                     }
-
-                    Divider()
 
                     // CI Check Runs
                     if let checks = pr.checkRuns, !checks.isEmpty {
@@ -472,35 +554,33 @@ struct CardDetailView: View {
                             }
                         }
                     }
-
-                    if pr.checkRuns != nil || pr.approvalCount != nil || pr.unresolvedThreads != nil {
-                        Divider()
-                    }
-
-                    // PR Body (lazy loaded)
-                    if isLoadingPRBody {
-                        HStack {
-                            Spacer()
-                            ProgressView()
-                                .controlSize(.small)
-                            Text("Loading PR description...")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                        }
-                        .padding(.vertical, 8)
-                    } else if let body = prBody ?? pr.body, !body.isEmpty {
-                        Markdown(body)
-                            .markdownTheme(.gitHub)
-                            .textSelection(.enabled)
-                    } else {
-                        Text("No description provided.")
-                            .foregroundStyle(.tertiary)
-                            .italic()
-                    }
                 }
-                .padding(16)
+
+                Divider()
+
+                // PR Body (lazy loaded — shows primary PR body)
+                if isLoadingPRBody {
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Loading PR description...")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    .padding(.vertical, 8)
+                } else if let body = prBody ?? card.link.prLink?.body, !body.isEmpty {
+                    Markdown(body)
+                        .markdownTheme(.compact)
+                        .textSelection(.enabled)
+                } else {
+                    Text("No description provided.")
+                        .foregroundStyle(.tertiary)
+                        .italic()
+                }
             }
+            .padding(16)
         }
     }
 
@@ -516,7 +596,7 @@ struct CardDetailView: View {
 
                 if let body = card.link.promptBody {
                     Markdown(body)
-                        .markdownTheme(.gitHub)
+                        .markdownTheme(.compact)
                         .textSelection(.enabled)
                 }
             }
@@ -618,14 +698,22 @@ struct CardDetailView: View {
                 }
             }
 
-            if let pr = card.link.prLink {
+            if !card.link.prLinks.isEmpty {
                 Divider()
-                Button {
-                    if let url = pr.url.flatMap({ URL(string: $0) }) {
-                        NSWorkspace.shared.open(url)
+                ForEach(card.link.prLinks, id: \.number) { pr in
+                    Button {
+                        if let url = pr.url.flatMap({ URL(string: $0) }) {
+                            NSWorkspace.shared.open(url)
+                        }
+                    } label: {
+                        Label("Open PR #\(pr.number)", systemImage: "arrow.up.right.square")
                     }
-                } label: {
-                    Label("Open PR #\(pr.number)", systemImage: "arrow.up.right.square")
+                }
+            }
+            if card.link.sessionLink != nil {
+                Divider()
+                Button(action: onDiscover) {
+                    Label("Discover PRs", systemImage: "arrow.triangle.pull")
                 }
             }
             if let issue = card.link.issueLink {
@@ -645,12 +733,9 @@ struct CardDetailView: View {
                 }
             }
 
-            let isOrphan = card.link.sessionLink == nil && card.link.tmuxLink == nil && card.link.worktreeLink == nil
-            if card.link.source == .manual || isOrphan {
-                Divider()
-                Button(role: .destructive, action: { showDeleteConfirm = true }) {
-                    Label("Delete Task", systemImage: "trash")
-                }
+            Divider()
+            Button(role: .destructive, action: { showDeleteConfirm = true }) {
+                Label("Delete Card", systemImage: "trash")
             }
         } label: {
             Image(systemName: "ellipsis")
@@ -876,6 +961,54 @@ private struct CopyableRow: View {
             .help("Copy to clipboard")
         }
     }
+}
+
+// MARK: - Compact Markdown Theme
+
+@MainActor
+extension Theme {
+    /// Smaller text, tighter spacing, no opaque background on code blocks.
+    static let compact = Theme()
+        .text { FontSize(.em(0.87)) }
+        .code {
+            FontFamilyVariant(.monospaced)
+            FontSize(.em(0.82))
+        }
+        .heading1 { configuration in
+            configuration.label
+                .markdownTextStyle { FontSize(.em(1.25)); FontWeight(.semibold) }
+                .markdownMargin(top: 12, bottom: 4)
+        }
+        .heading2 { configuration in
+            configuration.label
+                .markdownTextStyle { FontSize(.em(1.12)); FontWeight(.semibold) }
+                .markdownMargin(top: 10, bottom: 4)
+        }
+        .heading3 { configuration in
+            configuration.label
+                .markdownTextStyle { FontSize(.em(1.0)); FontWeight(.semibold) }
+                .markdownMargin(top: 8, bottom: 2)
+        }
+        .paragraph { configuration in
+            configuration.label
+                .relativeLineSpacing(.em(0.15))
+                .markdownMargin(top: 0, bottom: 8)
+        }
+        .codeBlock { configuration in
+            configuration.label
+                .markdownTextStyle {
+                    FontFamilyVariant(.monospaced)
+                    FontSize(.em(0.8))
+                }
+                .padding(8)
+                .background(.quaternary.opacity(0.5))
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+                .markdownMargin(top: 4, bottom: 8)
+        }
+        .listItem { configuration in
+            configuration.label
+                .markdownMargin(top: 2, bottom: 2)
+        }
 }
 
 /// Native rename dialog sheet.

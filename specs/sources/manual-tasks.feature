@@ -13,12 +13,19 @@ Feature: Manual Task Creation
     Then a task creation form should appear with:
       | Field              | Type                    | Required |
       | Prompt             | Multiline text editor   | yes      |
+      | Title              | Text field              | no       |
       | Project            | Dropdown picker         | yes      |
       | Start immediately  | Checkbox                | no       |
     And the prompt field placeholder should say "Describe what you want Claude to do..."
+    And the title field defaults to empty (first line of prompt used as card name)
 
-  Scenario: Prompt field splits into name and body
-    When I enter a multi-line prompt:
+  Scenario: Title field overrides auto-derived name
+    When I enter title "Auth Refactor" and prompt "Refactor the auth module..."
+    Then the card name should be "Auth Refactor"
+    And promptBody should be "Refactor the auth module..."
+
+  Scenario: Empty title uses first line of prompt
+    When I leave title empty and enter a multi-line prompt:
       """
       Refactor database layer
 
@@ -29,7 +36,7 @@ Feature: Manual Task Creation
     And the promptBody should be the full text
     And the promptBody is what gets sent to Claude
 
-  Scenario: Single-line prompt
+  Scenario: Single-line prompt with no title
     When I enter just "Fix the login button color"
     Then the card name should be "Fix the login button color"
     And the promptBody should be "Fix the login button color"
@@ -56,11 +63,14 @@ Feature: Manual Task Creation
     When I open the task creation form again
     Then "Start immediately" should still be unchecked
 
-  Scenario: Create and start immediately
-    When I create a task with "Start immediately" checked
-    Then the card should be created in the board
-    And the launch confirmation dialog should appear with the prompt
-    And on launch, the card gains tmuxLink + sessionLink
+  Scenario: Create and start immediately shows inline launch options
+    When "Start immediately" is checked, additional options appear inline:
+      | Option           | Condition                                    |
+      | Create worktree  | Enabled if project folder is a git repo      |
+      | Run remotely     | Enabled if project has remoteConfig           |
+      | Command preview  | Shows the command that will be executed       |
+    And clicking "Create & Start" launches directly (no second dialog)
+    And the card gains tmuxLink + sessionLink
     And exactly one card should exist (no duplicates)
 
   Scenario: Create without starting
@@ -107,9 +117,17 @@ Feature: Manual Task Creation
 
   Scenario: Deleting a manual task
     Given a manual task exists in the Backlog
-    When I right-click and select "Delete"
+    When I click "Delete" in the card detail view
     Then a confirmation dialog should appear
     And on confirm, the card should be permanently removed
+
+  Scenario: Deleting a card with an active session
+    Given a card has a tmux session and a .jsonl session file
+    When I delete the card
+    Then the tmux session should be killed
+    And the .jsonl session file should be deleted from disk
+    And the link should be removed from the coordination store
+    And the card should disappear from the board
 
   # ── Conversion ──
 

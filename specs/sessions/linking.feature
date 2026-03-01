@@ -72,19 +72,35 @@ Feature: Card Reconciliation and Link Management
     Then it should verify/update the worktreeLink.path if needed
     And not create a new card
 
-  # ── PR Matching ──
+  # ── PR Matching (Multi-PR) ──
+  #
+  # A card can have multiple PRs (prLinks array).
+  # PRs are discovered from worktreeLink.branch AND discoveredBranches.
 
-  Scenario: PR linked by branch name
+  Scenario: PR linked by worktree branch name
     Given a card has worktreeLink.branch = "feat/issue-123"
     And a PR exists with headRefName = "feat/issue-123"
     When the reconciler matches PRs
-    Then a prLink should be added to the card with the PR number
+    Then a PRLink should be appended to the card's prLinks array
+
+  Scenario: Multiple PRs linked from discovered branches
+    Given a card has discoveredBranches = ["feat/trace-discovery", "feat/custom-config"]
+    And PRs exist for both branches (#240 and #242)
+    When the orchestrator syncs PR data
+    Then prLinks should contain both PRs
+    And each should have status, title, and check runs populated
 
   Scenario: PR discovery does not create new cards
     Given a PR exists for branch "feat/unknown"
-    And no card has a worktreeLink matching that branch
+    And no card has a worktreeLink or discoveredBranch matching that branch
     Then no new card should be created for the PR alone
     Because PRs are attached to existing cards, not standalone
+
+  Scenario: Duplicate PRs are not added
+    Given a card already has PR #240 in prLinks
+    When the orchestrator finds PR #240 again on the next sync
+    Then it should update the existing entry (status, checks, etc.)
+    And NOT add a second entry for #240
 
   # ── GitHub Issue → Card Flow ──
 
@@ -170,7 +186,7 @@ Feature: Card Reconciliation and Link Management
     And I later forked it, creating a second session in the same worktree
     Then both sessions should appear as separate cards
     And both should have worktreeLink.branch = "feat/login"
-    And the PR should appear on both cards (same prLink.number)
+    And the PR should appear on both cards (same prLinks entry)
 
   # ── Session Switching Worktrees ──
 
@@ -194,6 +210,60 @@ Feature: Card Reconciliation and Link Management
     Then `tmux list-sessions` should be called at most every 5 seconds
     And the result should be cached between polls
 
+  # ── Branch Auto-Discovery ──
+  #
+  # Three layers of branch discovery, from cheapest to most expensive:
+  #   1. gitBranch field from JSONL metadata (every line has it)
+  #   2. Worktree disk scan (git worktree list)
+  #   3. Conversation scan for git push / gh pr create (cached, one-time)
+
+  Scenario: Session with --worktree auto-links branch from gitBranch field
+    Given a session was started with `claude --worktree`
+    And the JSONL lines contain gitBranch "worktree-feat-login"
+    When the session is discovered
+    Then worktreeLink.branch should be set to "worktree-feat-login"
+    And the card should match to any existing backlog/orphan card with that branch
+
+  Scenario: Session on main branch gets no branch link from gitBranch
+    Given a session was started without --worktree
+    And the JSONL gitBranch field is "main"
+    When the session is discovered
+    Then worktreeLink should NOT be set from gitBranch
+    Because "main" and "master" are filtered out as uninformative
+
+  Scenario: Session without worktree scans conversation for pushed branches
+    Given a session's gitBranch is "main" (no worktree)
+    And the session is less than 24 hours old
+    And the conversation contains Bash tool_use with `git push origin feat/new-feature`
+    When branch discovery runs
+    Then "feat/new-feature" should be added to discoveredBranches
+    And a PR matching that branch should be linked to the card
+
+  Scenario: Conversation scan extracts gh pr create output
+    Given a session contains a tool_result with "https://github.com/org/repo/pull/240"
+    When branch discovery runs
+    Then PR #240 should be discovered from the conversation
+
+  Scenario: Conversation scan finds multiple branches
+    Given a session pushed to branches "feat/progressive-trace-discovery" and "feat/custom-config"
+    And also pushed to "docs/custom-judge-docs" in a worktree
+    When branch discovery runs
+    Then all three branches should be in discoveredBranches
+    And PRs for each branch should be linked to the card
+
+  Scenario: Conversation scan is cached
+    Given a session was already scanned for branches (discoveredBranches is not nil)
+    When discovery runs again
+    Then the JSONL should NOT be re-scanned
+    And the cached discoveredBranches should be used
+
+  Scenario: Conversation scan only runs for recent sessions
+    Given a session is older than 24 hours
+    And it has no discoveredBranches
+    When discovery runs
+    Then the conversation should NOT be scanned
+    Because old sessions are unlikely to gain new branches
+
   # ── Branch-Centric Link Model ──
   #
   # A branch is the anchor for work:
@@ -208,7 +278,7 @@ Feature: Card Reconciliation and Link Management
       | Action                | Source                              |
       | Find worktree on disk | Branch name → worktree path         |
       | Find PR on GitHub     | headRefName = "feat/issue-123"      |
-    And both worktreeLink.path and prLink should be populated automatically
+    And both worktreeLink.path and prLinks should be populated automatically
 
   Scenario: Adding a branch to a card
     Given a card with no worktreeLink

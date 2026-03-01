@@ -16,7 +16,7 @@ public final class LaunchSession: SessionLauncher, @unchecked Sendable {
         shellOverride: String?,
         extraEnv: [String: String] = [:]
     ) async throws -> String {
-        let sessionName = tmuxSessionName(project: projectPath, worktree: worktreeName)
+        let sessionName = Self.tmuxSessionName(project: projectPath, worktree: worktreeName)
 
         // Build the claude command
         var cmd = "claude"
@@ -87,7 +87,7 @@ public final class LaunchSession: SessionLauncher, @unchecked Sendable {
         return parts.joined(separator: " ")
     }
 
-    private func tmuxSessionName(project: String, worktree: String?) -> String {
+    public static func tmuxSessionName(project: String, worktree: String?) -> String {
         let projectName = (project as NSString).lastPathComponent
         if let worktree {
             return "\(projectName)-\(worktree)"
