@@ -13,6 +13,16 @@ final class TerminalCache {
     static let shared = TerminalCache()
     private var terminals: [String: LocalProcessTerminalView] = [:]
 
+    /// Resolved tmux binary path — checked once, reused for all terminals.
+    private static let tmuxPath: String = {
+        for candidate in ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"] {
+            if FileManager.default.isExecutableFile(atPath: candidate) {
+                return candidate
+            }
+        }
+        return "tmux"
+    }()
+
     /// Get or create a terminal for the given tmux session name.
     func terminal(for sessionName: String, frame: NSRect) -> LocalProcessTerminalView {
         if let existing = terminals[sessionName] {
@@ -53,12 +63,14 @@ final class TerminalCache {
         // Wait for the tmux session to exist before attaching.
         // The .createTmuxSession effect runs async — the session may not
         // exist yet when the UI renders the terminal tab.
-        // Use the user's login shell (-l) so their PATH (Homebrew, etc.) is loaded.
+        // Use user's login shell for their env, plus full tmux path since
+        // GUI apps don't inherit Homebrew PATH.
         let escaped = sessionName.replacingOccurrences(of: "'", with: "'\\''")
+        let tmux = Self.tmuxPath
         let userShell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         terminal.startProcess(
             executable: userShell,
-            args: ["-l", "-c", "for i in $(seq 1 50); do tmux has-session -t '\(escaped)' 2>/dev/null && break; sleep 0.1; done; exec tmux attach-session -t '\(escaped)'"],
+            args: ["-l", "-c", "for i in $(seq 1 50); do '\(tmux)' has-session -t '\(escaped)' 2>/dev/null && break; sleep 0.1; done; exec '\(tmux)' attach-session -t '\(escaped)'"],
             environment: nil,
             execName: nil,
             currentDirectory: nil

@@ -303,6 +303,14 @@ struct CardDetailView: View {
                 Task { await loadPRBody() }
             }
         }
+        .onChange(of: card.link.sessionLink?.sessionPath) {
+            // When a session path appears (e.g., after launch discovers the session),
+            // restart the watcher so history starts updating live.
+            guard selectedTab == .history else { return }
+            guard card.link.sessionLink?.sessionPath != nil else { return }
+            startHistoryWatcher()
+            Task { await loadHistory() }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .kanbanHistoryChanged)) { _ in
             guard selectedTab == .history else { return }
             // Debounce: only reload if >0.5s since last reload
