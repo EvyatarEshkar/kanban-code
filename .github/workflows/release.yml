@@ -80,12 +80,13 @@ jobs:
           </dict></plist>
           PLIST
 
-          # Copy SPM bundle resources next to the binary (Bundle.main.bundleURL = .app/)
+          # Copy SPM resource bundle at .app root (where Bundle.main.bundleURL points)
           if [ -d ".build/${ARCH}-apple-macosx/release/KanbanCode_KanbanCode.bundle" ]; then
             cp -R ".build/${ARCH}-apple-macosx/release/KanbanCode_KanbanCode.bundle" "$BUNDLE_DIR/"
           fi
 
-          codesign --force --sign - "$BUNDLE_DIR"
+          # Sign Contents only (exclude root-level resource bundle from seal)
+          codesign --force --sign - "$BUNDLE_DIR/Contents/MacOS/KanbanCode"
 
           cd build
           zip -ry "KanbanCode-${VERSION}-macos.zip" KanbanCode.app
