@@ -80,9 +80,9 @@ jobs:
           </dict></plist>
           PLIST
 
-          # Copy SPM bundle resources
+          # Copy SPM bundle resources next to the binary (Bundle.main.bundleURL = .app/)
           if [ -d ".build/${ARCH}-apple-macosx/release/KanbanCode_KanbanCode.bundle" ]; then
-            cp -R ".build/${ARCH}-apple-macosx/release/KanbanCode_KanbanCode.bundle" "$BUNDLE_DIR/Contents/Resources/"
+            cp -R ".build/${ARCH}-apple-macosx/release/KanbanCode_KanbanCode.bundle" "$BUNDLE_DIR/"
           fi
 
           codesign --force --sign - "$BUNDLE_DIR"

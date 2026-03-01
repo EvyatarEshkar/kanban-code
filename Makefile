@@ -34,9 +34,9 @@ app: build
 	@echo '<key>CFBundleIconFile</key><string>AppIcon</string>' >> $(BUNDLE_DIR)/Contents/Info.plist
 	@echo '<key>CFBundleIconName</key><string>AppIcon</string>' >> $(BUNDLE_DIR)/Contents/Info.plist
 	@echo '</dict></plist>' >> $(BUNDLE_DIR)/Contents/Info.plist
-	@# Copy SPM bundle resources (clawd icon, etc.)
+	@# Copy SPM bundle resources next to the binary (Bundle.main.bundleURL = .app/)
 	@if [ -d .build/arm64-apple-macosx/debug/KanbanCode_KanbanCode.bundle ]; then \
-		cp -R .build/arm64-apple-macosx/debug/KanbanCode_KanbanCode.bundle $(BUNDLE_DIR)/Contents/Resources/; \
+		cp -R .build/arm64-apple-macosx/debug/KanbanCode_KanbanCode.bundle $(BUNDLE_DIR)/; \
 	fi
 	@# Code sign so macOS grants notification permissions
 	@codesign --force --sign - $(BUNDLE_DIR)
