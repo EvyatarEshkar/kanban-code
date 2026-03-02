@@ -6,6 +6,41 @@ private enum DetailTab: String {
     case terminal, history, issue, pullRequest, prompt
 }
 
+/// Button style that provides hover (brighten) and press (dim + scale) feedback
+/// for custom-styled plain buttons.
+private struct HoverFeedbackStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HoverableBody(configuration: configuration)
+    }
+
+    private struct HoverableBody: View {
+        let configuration: ButtonStyleConfiguration
+        @State private var isHovered = false
+
+        var body: some View {
+            configuration.label
+                .brightness(configuration.isPressed ? -0.08 : isHovered ? 0.06 : 0)
+                .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
+                .onHover { isHovered = $0 }
+                .animation(.easeInOut(duration: 0.12), value: isHovered)
+                .animation(.easeInOut(duration: 0.08), value: configuration.isPressed)
+        }
+    }
+}
+
+/// View modifier that adds hover brightness feedback (for Menu and other non-Button views).
+private struct HoverBrightness: ViewModifier {
+    var amount: Double = 0.06
+    @State private var isHovered = false
+
+    func body(content: Content) -> some View {
+        content
+            .brightness(isHovered ? amount : 0)
+            .onHover { isHovered = $0 }
+            .animation(.easeInOut(duration: 0.12), value: isHovered)
+    }
+}
+
 struct CardDetailView: View {
     let card: KanbanCodeCard
     var onResume: () -> Void = {}
@@ -21,6 +56,8 @@ struct CardDetailView: View {
     var onKillTerminal: (String) -> Void = { _ in }
     var onDiscover: () -> Void = {}
     @Binding var focusTerminal: Bool
+
+    @AppStorage("preferredEditorBundleId") private var editorBundleId: String = "dev.zed.Zed"
 
     @State private var turns: [ConversationTurn] = []
     @State private var isLoadingHistory = false
@@ -119,15 +156,14 @@ struct CardDetailView: View {
                                     .background((isStart ? Color.green : Color.blue).opacity(0.08), in: Capsule())
                                     .background(.ultraThinMaterial, in: Capsule())
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(HoverFeedbackStyle())
                             .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
                             .help(isStart ? "Start work on this task" : "Resume session")
                         }
 
                         if let path = card.link.worktreeLink?.path ?? card.link.projectPath {
                             Button {
-                                let url = URL(fileURLWithPath: path)
-                                NSWorkspace.shared.open(url)
+                                EditorDiscovery.open(path: path, bundleId: editorBundleId)
                             } label: {
                                 Image(systemName: "chevron.left.forwardslash.chevron.right")
                                     .font(.system(size: 13))
@@ -136,6 +172,7 @@ struct CardDetailView: View {
                             .buttonStyle(.plain)
                             .glassEffect(.regular, in: .capsule)
                             .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
+                            .modifier(HoverBrightness())
                             .help("Open in editor")
                         }
 
@@ -143,6 +180,7 @@ struct CardDetailView: View {
                             .frame(width: 36, height: 36)
                             .glassEffect(.regular, in: .capsule)
                             .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
+                            .modifier(HoverBrightness())
                             .help("More actions")
                     }
                 }
@@ -921,8 +959,10 @@ struct CardDetailView: View {
     private func loadHistory() async {
         guard let path = card.link.sessionLink?.sessionPath ?? card.session?.jsonlPath else { return }
         if turns.isEmpty { isLoadingHistory = true }
+        // Preserve expanded window: if user loaded more than pageSize, keep that many
+        let loadCount = max(Self.pageSize, turns.count)
         do {
-            let result = try await TranscriptReader.readTail(from: path, maxTurns: Self.pageSize)
+            let result = try await TranscriptReader.readTail(from: path, maxTurns: loadCount)
             turns = result.turns
             hasMoreTurns = result.hasMore
         } catch {

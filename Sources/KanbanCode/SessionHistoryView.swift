@@ -34,6 +34,7 @@ struct SessionHistoryView: View {
     @State private var searchMatchIndices: [Int] = []
     @State private var currentMatchPosition: Int = 0
     @State private var searchDebounceTask: Task<Void, Never>?
+    @State private var didOverscrollTop = false
 
     private static let maxSearchResults = 200
 
@@ -86,29 +87,17 @@ struct SessionHistoryView: View {
                                 checkpointBanner
                             }
 
-                            // "Load earlier" button
-                            if hasMoreTurns && activeQuery.isEmpty {
-                                Button {
-                                    onLoadMore?()
-                                } label: {
-                                    HStack(spacing: 4) {
-                                        if isLoadingMore {
-                                            ProgressView()
-                                                .controlSize(.mini)
-                                        } else {
-                                            Image(systemName: "arrow.up")
-                                                .font(.caption2)
-                                        }
-                                        Text("Load 80 earlier turns")
-                                            .font(.caption)
-                                    }
-                                    .foregroundStyle(.white.opacity(0.5))
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 6)
+                            // Loading indicator for auto-loaded earlier turns
+                            if hasMoreTurns && activeQuery.isEmpty && isLoadingMore {
+                                HStack(spacing: 4) {
+                                    ProgressView()
+                                        .controlSize(.mini)
+                                    Text("Loading earlier turns…")
+                                        .font(.caption)
                                 }
-                                .buttonStyle(.plain)
-                                .disabled(isLoadingMore)
-                                .id("load-more")
+                                .foregroundStyle(.white.opacity(0.5))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 6)
                             }
 
                             VStack(alignment: .leading, spacing: 2) {
@@ -139,9 +128,18 @@ struct SessionHistoryView: View {
                         }
                         .background(DarkScrollbarModifier())
                         .background(ScrollBottomDetector(isAtBottom: $isAtBottom))
+                        .background(OverscrollDetector(didOverscrollTop: $didOverscrollTop))
                     }
                     .onAppear { scrollToBottom(proxy: proxy, force: true) }
-                    .onChange(of: turns.count) { scrollToBottom(proxy: proxy) }
+                    .onChange(of: turns.count) {
+                        scrollToBottom(proxy: proxy)
+                        didOverscrollTop = false
+                    }
+                    .onChange(of: didOverscrollTop) {
+                        if didOverscrollTop && hasMoreTurns && !isLoadingMore && activeQuery.isEmpty {
+                            onLoadMore?()
+                        }
+                    }
                     .onChange(of: currentMatchPosition) {
                         guard !searchMatchIndices.isEmpty,
                               currentMatchPosition < searchMatchIndices.count else { return }
@@ -598,6 +596,62 @@ private struct ScrollBottomDetector: NSViewRepresentable {
             if isAtBottom.wrappedValue != atBottom {
                 DispatchQueue.main.async { [isAtBottom] in
                     isAtBottom.wrappedValue = atBottom
+                }
+            }
+        }
+    }
+}
+
+/// Detects overscroll (rubber-band) past the top of the scroll view — the
+/// "pull to refresh" gesture.  Fires once per pull; resets when the binding
+/// is cleared externally (e.g. after new content loads).
+private struct OverscrollDetector: NSViewRepresentable {
+    @Binding var didOverscrollTop: Bool
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            guard let scrollView = view.enclosingScrollView else { return }
+            let clipView = scrollView.contentView
+            clipView.postsBoundsChangedNotifications = true
+            NotificationCenter.default.addObserver(
+                context.coordinator,
+                selector: #selector(Coordinator.boundsChanged(_:)),
+                name: NSView.boundsDidChangeNotification,
+                object: clipView
+            )
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        // Re-arm when the parent resets the binding to false
+        if !didOverscrollTop {
+            context.coordinator.hasTriggered = false
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(didOverscrollTop: $didOverscrollTop)
+    }
+
+    @MainActor class Coordinator: NSObject {
+        private var didOverscrollTop: Binding<Bool>
+        var hasTriggered = false
+
+        init(didOverscrollTop: Binding<Bool>) {
+            self.didOverscrollTop = didOverscrollTop
+        }
+
+        @objc func boundsChanged(_ notification: Notification) {
+            guard let clipView = notification.object as? NSClipView else { return }
+            let scrollOffset = clipView.bounds.origin.y
+
+            // Negative offset = rubber-banding past the top
+            if scrollOffset < -30 && !hasTriggered {
+                hasTriggered = true
+                DispatchQueue.main.async { [didOverscrollTop] in
+                    didOverscrollTop.wrappedValue = true
                 }
             }
         }

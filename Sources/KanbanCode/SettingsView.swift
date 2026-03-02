@@ -1,34 +1,56 @@
 import SwiftUI
 import KanbanCodeCore
 
-// MARK: - Editor preference
+// MARK: - Editor discovery
 
-enum PreferredEditor: String, CaseIterable, Identifiable {
-    case zed = "Zed"
-    case cursor = "Cursor"
-    case vscode = "Visual Studio Code"
-    case textEdit = "TextEdit"
+/// Discovers installed code editors and opens files/folders in them.
+enum EditorDiscovery {
+    /// Known code editor bundle IDs — only installed ones appear in the picker.
+    private static let knownEditors: [(bundleId: String, name: String)] = [
+        ("dev.zed.Zed", "Zed"),
+        ("com.todesktop.230313mzl4w4u92", "Cursor"),
+        ("com.microsoft.VSCode", "VS Code"),
+        ("com.apple.dt.Xcode", "Xcode"),
+        ("com.jetbrains.intellij", "IntelliJ IDEA"),
+        ("com.jetbrains.intellij.ce", "IntelliJ CE"),
+        ("com.jetbrains.CLion", "CLion"),
+        ("com.jetbrains.WebStorm", "WebStorm"),
+        ("com.jetbrains.pycharm", "PyCharm"),
+        ("com.jetbrains.goland", "GoLand"),
+        ("com.jetbrains.rider", "Rider"),
+        ("com.jetbrains.rustrover", "RustRover"),
+        ("com.sublimetext.4", "Sublime Text"),
+        ("com.sublimetext.3", "Sublime Text 3"),
+        ("org.vim.MacVim", "MacVim"),
+        ("org.gnu.Emacs", "Emacs"),
+        ("com.panic.Nova", "Nova"),
+        ("com.barebones.bbedit", "BBEdit"),
+        ("co.aspect.browser", "Windsurf"),
+        ("com.neovide.neovide", "Neovide"),
+        ("com.apple.TextEdit", "TextEdit"),
+    ]
 
-    var id: String { rawValue }
+    struct Editor: Identifiable, Hashable {
+        let bundleId: String
+        let name: String
+        let icon: NSImage
+        var id: String { bundleId }
+    }
 
-    var bundleId: String {
-        switch self {
-        case .zed: "dev.zed.Zed"
-        case .cursor: "com.todesktop.230313mzl4w4u92"
-        case .vscode: "com.microsoft.VSCode"
-        case .textEdit: "com.apple.TextEdit"
+    /// Returns only editors that are installed on this system.
+    static func installedEditors() -> [Editor] {
+        knownEditors.compactMap { entry in
+            guard let appURL = NSWorkspace.shared.urlForApplication(
+                withBundleIdentifier: entry.bundleId
+            ) else { return nil }
+            let icon = NSWorkspace.shared.icon(forFile: appURL.path)
+            icon.size = NSSize(width: 16, height: 16)
+            return Editor(bundleId: entry.bundleId, name: entry.name, icon: icon)
         }
     }
 
-    /// Open a file in this editor. Creates the file if it doesn't exist.
-    func open(path: String) {
-        // Ensure file exists
-        let dir = (path as NSString).deletingLastPathComponent
-        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        if !FileManager.default.fileExists(atPath: path) {
-            FileManager.default.createFile(atPath: path, contents: "{}".data(using: .utf8))
-        }
-
+    /// Open a path in the editor with the given bundle ID.
+    static func open(path: String, bundleId: String) {
         let url = URL(fileURLWithPath: path)
         if let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) {
             NSWorkspace.shared.open(
@@ -37,9 +59,18 @@ enum PreferredEditor: String, CaseIterable, Identifiable {
                 configuration: NSWorkspace.OpenConfiguration()
             )
         } else {
-            // Fallback: open with default app
             NSWorkspace.shared.open(url)
         }
+    }
+
+    /// Open a file in the editor, creating it first if needed (for config files).
+    static func openFile(path: String, bundleId: String) {
+        let dir = (path as NSString).deletingLastPathComponent
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        if !FileManager.default.fileExists(atPath: path) {
+            FileManager.default.createFile(atPath: path, contents: "{}".data(using: .utf8))
+        }
+        open(path: path, bundleId: bundleId)
     }
 }
 
@@ -95,7 +126,8 @@ struct GeneralSettingsView: View {
     let tmuxAvailable: Bool
     let mutagenAvailable: Bool
 
-    @AppStorage("preferredEditor") private var preferredEditor: PreferredEditor = .zed
+    @AppStorage("preferredEditorBundleId") private var editorBundleId: String = "dev.zed.Zed"
+    @State private var installedEditors: [EditorDiscovery.Editor] = []
     @State private var showOnboarding = false
 
     private let settingsStore = SettingsStore()
@@ -103,9 +135,14 @@ struct GeneralSettingsView: View {
     var body: some View {
         Form {
             Section("Editor") {
-                Picker("Open files with", selection: $preferredEditor) {
-                    ForEach(PreferredEditor.allCases) { editor in
-                        Text(editor.rawValue).tag(editor)
+                Picker("Open files with", selection: $editorBundleId) {
+                    ForEach(installedEditors) { editor in
+                        Label {
+                            Text(editor.name)
+                        } icon: {
+                            Image(nsImage: editor.icon)
+                        }
+                        .tag(editor.bundleId)
                     }
                 }
             }
@@ -146,7 +183,7 @@ struct GeneralSettingsView: View {
                     Spacer()
                     Button("Open in Editor") {
                         let path = (NSHomeDirectory() as NSString).appendingPathComponent(".kanban-code/settings.json")
-                        preferredEditor.open(path: path)
+                        EditorDiscovery.openFile(path: path, bundleId: editorBundleId)
                     }
                     .controlSize(.small)
                 }
@@ -161,6 +198,9 @@ struct GeneralSettingsView: View {
         }
         .formStyle(.grouped)
         .padding()
+        .onAppear {
+            installedEditors = EditorDiscovery.installedEditors()
+        }
         .sheet(isPresented: $showOnboarding) {
             OnboardingWizard(
                 settingsStore: settingsStore,
