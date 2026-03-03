@@ -144,7 +144,7 @@ struct ContentView: View {
             store: store,
             onStartCard: { cardId in startCard(cardId: cardId) },
             onResumeCard: { cardId in resumeCard(cardId: cardId) },
-            onForkCard: { cardId in forkCard(cardId: cardId) },
+            onForkCard: { cardId in pendingForkCardId = cardId },
             onCopyResumeCmd: { cardId in
                 guard let card = store.state.cards.first(where: { $0.id == cardId }) else { return }
                 var cmd = ""
@@ -260,7 +260,7 @@ struct ContentView: View {
                         onResumeCard: { card in
                             resumeCard(cardId: card.id)
                         },
-                        onForkCard: { card in forkCard(cardId: card.id) },
+                        onForkCard: { card in pendingForkCardId = card.id },
                         onCheckpointCard: { card in
                             store.dispatch(.selectCard(cardId: card.id))
                         }
@@ -411,6 +411,35 @@ struct ContentView: View {
                 }
             } message: {
                 Text("This card has running terminals. Archiving will kill them.")
+            }
+            .alert(
+                "Fork Session?",
+                isPresented: Binding(
+                    get: { pendingForkCardId != nil },
+                    set: { if !$0 { pendingForkCardId = nil } }
+                )
+            ) {
+                Button("Cancel", role: .cancel) {
+                    pendingForkCardId = nil
+                }
+                if let cardId = pendingForkCardId,
+                   store.state.cards.first(where: { $0.id == cardId })?.link.worktreeLink != nil {
+                    Button("Fork (same worktree)") {
+                        if let cardId = pendingForkCardId { forkCard(cardId: cardId, keepWorktree: true) }
+                        pendingForkCardId = nil
+                    }
+                }
+                Button("Fork (project root)") {
+                    if let cardId = pendingForkCardId { forkCard(cardId: cardId) }
+                    pendingForkCardId = nil
+                }
+            } message: {
+                if pendingForkCardId != nil,
+                   store.state.cards.first(where: { $0.id == pendingForkCardId })?.link.worktreeLink != nil {
+                    Text("This creates a duplicate session you can resume independently. Do you want the forked session to continue from the same worktree or from the project root?")
+                } else {
+                    Text("This creates a duplicate session you can resume independently.")
+                }
             }
             .alert(
                 "Cleanup Worktree?",
@@ -1640,6 +1669,7 @@ struct ContentView: View {
     @State private var pendingWorktreeCleanup: WorktreeCleanupInfo?
     @State private var pendingDeleteCardId: String?
     @State private var pendingArchiveCardId: String?
+    @State private var pendingForkCardId: String?
     @State private var pendingWorktreeCleanupCardId: String?
     @State private var shouldFocusTerminal = false
     @State private var keyMonitor: Any?

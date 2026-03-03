@@ -433,11 +433,15 @@ struct CardDetailView: View {
         .alert("Fork Session?", isPresented: $showForkConfirm) {
             Button("Cancel", role: .cancel) {}
             if card.link.worktreeLink != nil {
-                Button("Fork to same worktree") { onFork(true) }
+                Button("Fork (same worktree)") { onFork(true) }
             }
-            Button("Fork") { onFork(false) }
+            Button("Fork (project root)") { onFork(false) }
         } message: {
-            Text("This creates a duplicate session you can resume independently.")
+            if card.link.worktreeLink != nil {
+                Text("This creates a duplicate session you can resume independently. Do you want the forked session to continue from the same worktree or from the project root?")
+            } else {
+                Text("This creates a duplicate session you can resume independently.")
+            }
         }
         .alert("Restore to Turn \(checkpointTurn.map { String($0.index + 1) } ?? "")?", isPresented: $showCheckpointConfirm) {
             Button("Cancel", role: .cancel) {
