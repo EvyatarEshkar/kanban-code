@@ -7,6 +7,7 @@ public actor GitRemoteResolver {
     public static let shared = GitRemoteResolver()
 
     private var cache: [String: String?] = [:]
+    private let gitPath = ShellCommand.findExecutable("git") ?? "/usr/bin/git"
 
     /// Returns the GitHub base URL for a repo at the given path, or nil if not a GitHub repo.
     /// Example: "/Users/me/projects/langwatch" → "https://github.com/langwatch/langwatch"
@@ -16,7 +17,7 @@ public actor GitRemoteResolver {
         }
 
         let result = try? await ShellCommand.run(
-            "/usr/bin/git",
+            gitPath,
             arguments: ["remote", "get-url", "origin"],
             currentDirectory: projectPath
         )

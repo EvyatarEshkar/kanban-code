@@ -4,8 +4,8 @@ import Foundation
 public final class GitWorktreeAdapter: WorktreeManagerPort, @unchecked Sendable {
     private let gitPath: String
 
-    public init(gitPath: String = "/usr/bin/git") {
-        self.gitPath = gitPath
+    public init(gitPath: String? = nil) {
+        self.gitPath = gitPath ?? ShellCommand.findExecutable("git") ?? "/usr/bin/git"
     }
 
     public func listWorktrees(repoRoot: String) async throws -> [Worktree] {

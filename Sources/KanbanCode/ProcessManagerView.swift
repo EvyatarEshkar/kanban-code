@@ -44,6 +44,9 @@ struct ProcessManagerView: View {
     private let tmuxAdapter = TmuxAdapter()
     private let worktreeAdapter = GitWorktreeAdapter()
 
+    private let tmuxFound = ShellCommand.findExecutable("tmux") != nil
+    private let gitFound = ShellCommand.findExecutable("git") != nil
+
     var body: some View {
         VStack(spacing: 0) {
             // Tab picker
@@ -131,7 +134,11 @@ struct ProcessManagerView: View {
     // MARK: - Tmux Tab
 
     private var tmuxTab: some View {
-        Table(tmuxSessions, selection: $selectedTmuxIds) {
+        VStack(spacing: 0) {
+            if !tmuxFound {
+                binaryNotFoundBanner("tmux")
+            }
+            Table(tmuxSessions, selection: $selectedTmuxIds) {
             TableColumn("") { session in
                 Circle()
                     .fill(session.attached ? .green : .gray)
@@ -190,12 +197,19 @@ struct ProcessManagerView: View {
             }
             .width(24)
         }
+        }
     }
 
     // MARK: - Claude Tab
 
+    private let claudeFound = ShellCommand.findExecutable("claude") != nil
+
     private var claudeTab: some View {
-        Table(claudeProcesses, selection: $selectedClaudeIds) {
+        VStack(spacing: 0) {
+            if !claudeFound {
+                binaryNotFoundBanner("claude")
+            }
+            Table(claudeProcesses, selection: $selectedClaudeIds) {
             TableColumn("PID") { process in
                 Text("\(process.id)")
                     .monospacedDigit()
@@ -233,12 +247,17 @@ struct ProcessManagerView: View {
             }
             .width(min: 80, ideal: 140)
         }
+        }
     }
 
     // MARK: - Worktrees Tab
 
     private var worktreesTab: some View {
-        Table(worktreeInfos, selection: $selectedWorktreeIds) {
+        VStack(spacing: 0) {
+            if !gitFound {
+                binaryNotFoundBanner("git")
+            }
+            Table(worktreeInfos, selection: $selectedWorktreeIds) {
             TableColumn("Project") { info in
                 Text(info.project)
                     .lineLimit(1)
@@ -262,6 +281,7 @@ struct ProcessManagerView: View {
                     .lineLimit(1)
             }
             .width(min: 150, ideal: 250)
+        }
         }
     }
 
@@ -458,5 +478,32 @@ struct ProcessManagerView: View {
             return "~" + path.dropFirst(home.count)
         }
         return path
+    }
+
+    private func binaryNotFoundBanner(_ name: String) -> some View {
+        let home = NSHomeDirectory()
+        let paths = [
+            "~/.claude/local", "~/.local/bin",
+            "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin",
+        ].map { "\($0)/\(name)" }
+            .map { $0.replacingOccurrences(of: home, with: "~") }
+
+        return HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(name) not found")
+                    .font(.callout)
+                    .fontWeight(.medium)
+                Text("Searched: \(paths.joined(separator: ", "))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(10)
+        .background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
     }
 }

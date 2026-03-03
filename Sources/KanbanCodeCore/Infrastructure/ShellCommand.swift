@@ -57,11 +57,14 @@ public enum ShellCommand {
     /// so Homebrew and other tools aren't found via `env` or `which`.
     /// Returns nil if the command isn't found anywhere.
     public static func findExecutable(_ command: String) -> String? {
+        let home = NSHomeDirectory()
         let searchPaths = [
-            "/opt/homebrew/bin",    // Homebrew (Apple Silicon)
-            "/usr/local/bin",       // Homebrew (Intel) / manual installs
-            "/usr/bin",             // System binaries
-            "/bin",                 // Core system binaries
+            "\(home)/.claude/local",   // Claude Code managed install
+            "\(home)/.local/bin",      // XDG local bin / claude installer
+            "/opt/homebrew/bin",       // Homebrew (Apple Silicon)
+            "/usr/local/bin",          // Homebrew (Intel) / npm global
+            "/usr/bin",                // System binaries
+            "/bin",                    // Core system binaries
         ]
         for dir in searchPaths {
             let path = "\(dir)/\(command)"
