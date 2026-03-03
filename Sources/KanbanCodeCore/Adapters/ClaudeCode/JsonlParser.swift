@@ -120,12 +120,18 @@ public enum JsonlParser {
     /// Looks for git branch activity in Bash tool_use blocks:
     /// `git push`, `git checkout -b`, `git switch -c`, `git worktree add -b`, `git branch <name>`.
     /// Returns deduplicated branches with their repo paths (excluding main/master).
-    public static func extractPushedBranches(from filePath: String) async throws -> [DiscoveredBranch] {
+    public static func extractPushedBranches(from filePath: String, startOffset: Int? = nil) async throws -> [DiscoveredBranch] {
         guard FileManager.default.fileExists(atPath: filePath) else { return [] }
 
         let url = URL(fileURLWithPath: filePath)
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
+
+        // Seek past already-scanned bytes (incremental scanning).
+        // The first partial line after seeking will fail JSON parse and be skipped.
+        if let offset = startOffset, offset > 0 {
+            handle.seek(toFileOffset: UInt64(offset))
+        }
 
         // Regex: git push [flags...] origin|upstream <branch>
         let pushRegex = /git\s+push\s+(?:-[^\s]+\s+)*(?:origin|upstream)\s+(\S+)/
@@ -188,6 +194,89 @@ public enum JsonlParser {
         }
 
         return Array(branches).sorted { $0.branch < $1.branch }
+    }
+
+    /// Scan a session JSONL bottom-up for the most recently pushed branch.
+    /// Reads in reverse chunks and stops at the first match — efficient for large files.
+    /// `stopAtOffset` is the lower bound (e.g. a watermark); bytes before it are not scanned.
+    public static func extractLatestPushedBranch(
+        from filePath: String,
+        stopAtOffset: Int = 0
+    ) async throws -> DiscoveredBranch? {
+        guard FileManager.default.fileExists(atPath: filePath) else { return nil }
+
+        let attrs = try FileManager.default.attributesOfItem(atPath: filePath)
+        let fileSize = (attrs[.size] as? Int) ?? 0
+        guard fileSize > stopAtOffset else { return nil }
+
+        let handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: filePath))
+        defer { try? handle.close() }
+
+        let pushRegex = /git\s+push\s+(?:-[^\s]+\s+)*(?:origin|upstream)\s+(\S+)/
+        let cdRegex = /cd\s+([^\s;&]+)\s*&&/
+
+        let chunkSize = 256 * 1024
+        var trailingPartial = "" // start of a line split by the chunk boundary
+        var currentEnd = fileSize
+
+        while currentEnd > stopAtOffset {
+            let readStart = max(currentEnd - chunkSize, stopAtOffset)
+            let readCount = currentEnd - readStart
+
+            handle.seek(toFileOffset: UInt64(readStart))
+            guard let chunkData = try? handle.read(upToCount: readCount),
+                  var chunkStr = String(data: chunkData, encoding: .utf8) else {
+                currentEnd = readStart
+                continue
+            }
+
+            // The trailing partial is the start of a line whose end was in the next chunk.
+            // Appending reconstructs the full line at the boundary.
+            chunkStr += trailingPartial
+
+            var lines = chunkStr.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+
+            // First element may be a partial line (unless we're at the start of the scan range)
+            if readStart > stopAtOffset {
+                trailingPartial = lines.removeFirst()
+            } else {
+                trailingPartial = ""
+            }
+
+            // Process lines newest-first (reverse order)
+            for line in lines.reversed() {
+                guard !line.isEmpty, line.contains("\"tool_use\"") else { continue }
+
+                guard let lineData = line.data(using: .utf8),
+                      let obj = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+                      let message = obj["message"] as? [String: Any],
+                      let content = message["content"] as? [[String: Any]] else { continue }
+
+                // Scan blocks in reverse too — last tool_use in the message is most recent
+                for block in content.reversed() {
+                    guard block["type"] as? String == "tool_use",
+                          block["name"] as? String == "Bash",
+                          let input = block["input"] as? [String: Any],
+                          let command = input["command"] as? String else { continue }
+
+                    var repoPath: String?
+                    if let cdMatch = command.firstMatch(of: cdRegex) {
+                        repoPath = resolveGitRoot(String(cdMatch.output.1))
+                    }
+
+                    if let match = command.firstMatch(of: pushRegex) {
+                        let branch = String(match.output.1)
+                        if branch != "main" && branch != "master" && !branch.hasPrefix("-") {
+                            return DiscoveredBranch(branch: branch, repoPath: repoPath)
+                        }
+                    }
+                }
+            }
+
+            currentEnd = readStart
+        }
+
+        return nil
     }
 
     /// Resolve a path to its likely git root.

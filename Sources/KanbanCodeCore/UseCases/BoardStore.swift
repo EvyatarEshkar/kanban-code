@@ -385,8 +385,15 @@ public enum Reducer {
                 link.issueLink = nil
                 link.manualOverrides.issueLink = true
             case .worktree:
+                // Set watermark = current JSONL file size. Data before this point is ignored.
+                if let path = link.sessionLink?.sessionPath {
+                    let size = (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? Int) ?? 0
+                    link.manualOverrides.branchWatermark = size
+                } else {
+                    link.manualOverrides.branchWatermark = 0
+                }
+                link.discoveredBranches = nil  // clear old cached branches
                 link.worktreeLink = nil
-                link.manualOverrides.worktreePath = true
             case .tmux:
                 link.tmuxLink = nil
                 link.manualOverrides.tmuxSession = true
@@ -1043,7 +1050,7 @@ public final class BoardStore: @unchecked Sendable {
             KanbanCodeLog.info("reconcile", "discoverSessions: \(t1.duration(to: .now)) (\(sessions.count) sessions)")
 
             // Use in-memory state as source of truth — NOT disk.
-            let existingLinks = Array(state.links.values)
+            var existingLinks = Array(state.links.values)
 
             // Deduplicate repo roots — multiple projects can share the same repo
             let uniqueRepoRoots = Set(configuredProjects.map(\.effectiveRepoRoot))
@@ -1061,6 +1068,27 @@ public final class BoardStore: @unchecked Sendable {
                 KanbanCodeLog.info("reconcile", "worktrees: \(t.duration(to: .now)) (\(total) across \(uniqueRepoRoots.count) repos)")
             }
 
+            // Incremental branch scan for watermarked cards.
+            // Reads bottom-up from EOF to watermark — stops at the most recent push.
+            for i in existingLinks.indices {
+                guard let watermark = existingLinks[i].manualOverrides.branchWatermark,
+                      let sessionPath = existingLinks[i].sessionLink?.sessionPath else { continue }
+                let attrs = try? FileManager.default.attributesOfItem(atPath: sessionPath)
+                let fileSize = (attrs?[.size] as? Int) ?? 0
+                guard fileSize > watermark else { continue }
+                if let latest = try? await JsonlParser.extractLatestPushedBranch(
+                    from: sessionPath, stopAtOffset: watermark
+                ) {
+                    existingLinks[i].discoveredBranches = [latest.branch]
+                    if let repo = latest.repoPath, repo != existingLinks[i].projectPath {
+                        existingLinks[i].discoveredRepos = [latest.branch: repo]
+                    } else {
+                        existingLinks[i].discoveredRepos = nil
+                    }
+                }
+                existingLinks[i].manualOverrides.branchWatermark = fileSize
+            }
+
             // Collect branches + PR numbers from active cards only (inProgress..done).
             // We skip backlog (no PRs yet) and allSessions (archived, don't need refresh).
             let activeColumns: Set<KanbanCodeColumn> = [.inProgress, .waiting, .inReview, .done]
@@ -1075,7 +1103,9 @@ public final class BoardStore: @unchecked Sendable {
                 }
                 if let discovered = link.discoveredBranches {
                     for branch in discovered {
-                        branchesByRepo[repoRoot, default: []].insert(branch)
+                        // Use discoveredRepos for correct repo routing (branch may be in a different repo)
+                        let effectiveRepo = link.discoveredRepos?[branch] ?? repoRoot
+                        branchesByRepo[effectiveRepo, default: []].insert(branch)
                     }
                 }
                 // Collect existing PR numbers to refresh status

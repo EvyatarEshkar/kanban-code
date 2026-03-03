@@ -160,9 +160,9 @@ public enum CardReconciler {
                 if baseName == "main" || baseName == "master" { continue }
                 if let cardId = cardIdBySessionId[session.id],
                    !(cardIdsByBranch[baseName]?.contains(cardId) ?? false) {
-                    // Skip cards that explicitly have no worktree (e.g. fork from root) —
+                    // Skip cards with branch discovery blocked (watermark or legacy worktreePath) —
                     // the session's baked-in gitBranch belongs to the parent, not this card.
-                    if linksById[cardId]?.manualOverrides.worktreePath == true { continue }
+                    if linksById[cardId]?.manualOverrides.isBranchDiscoveryBlocked == true { continue }
                     cardIdsByBranch[baseName, default: []].append(cardId)
                 }
             }
@@ -219,12 +219,20 @@ public enum CardReconciler {
                     for cardId in existingCardIds {
                         if var link = linksById[cardId] {
                             if link.worktreeLink != nil {
-                                // Already has worktreeLink — just update the path
-                                link.worktreeLink?.path = worktree.path
-                            } else if link.manualOverrides.worktreePath {
-                                // User explicitly chose no worktree (e.g. fork from root) — respect it
+                                // Already has worktreeLink — only update path if same branch.
+                                // Prevents cross-repo flipping when discoveredBranches span repos
+                                // (e.g. card indexed for branches in both langwatch and scenario).
+                                if link.worktreeLink?.branch == baseName {
+                                    link.worktreeLink?.path = worktree.path
+                                }
+                            } else if link.manualOverrides.isBranchDiscoveryBlocked {
+                                // Branch discovery blocked (watermark or legacy) — don't re-attach worktree
                                 continue
                             } else {
+                                // Attach worktree only if repo matches the card's expected repo for this branch.
+                                // discoveredRepos tracks which repo each branch came from; absent = projectPath.
+                                let expectedRepo = link.discoveredRepos?[baseName] ?? link.projectPath
+                                guard expectedRepo == nil || expectedRepo == repoRoot else { continue }
                                 KanbanCodeLog.info("reconciler", "Setting worktreeLink on card \(cardId.prefix(12)) for branch=\(baseName)")
                                 link.worktreeLink = WorktreeLink(path: worktree.path, branch: baseName)
                             }
@@ -346,7 +354,7 @@ public enum CardReconciler {
             // Clear dead worktree links (path no longer exists on disk)
             if let wtPath = link.worktreeLink?.path,
                !wtPath.isEmpty,
-               !link.manualOverrides.worktreePath,
+               !link.manualOverrides.isBranchDiscoveryBlocked,
                didScanWorktrees, // only clear if we actually scanned worktrees
                !liveWorktreePaths.contains(wtPath) {
                 link.worktreeLink = nil

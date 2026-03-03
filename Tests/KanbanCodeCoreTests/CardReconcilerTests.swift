@@ -740,13 +740,13 @@ struct CardReconcilerTests {
     @Test("Forked card (project root) does NOT get worktreeLink re-attached")
     func forkedCardNoWorktreeReattach() {
         // When a card is forked with "project root" option:
-        // - manualOverrides.worktreePath = true (user chose "no worktree")
+        // - manualOverrides.branchWatermark is set (byte offset at fork time)
         // - worktreeLink is nil (explicitly removed)
         // - projectPath is the parent repo
         // - sessionLink is set (forked .jsonl)
         //
         // The forked .jsonl still contains cwd pointing to the worktree.
-        // Reconciler should NOT re-attach a worktreeLink because manualOverrides.worktreePath is set.
+        // Reconciler should NOT re-attach a worktreeLink because branchWatermark is set.
         //
         // The original card still exists and owns the worktree.
         let originalCard = Link(
@@ -770,7 +770,7 @@ struct CardReconcilerTests {
             )
             // worktreeLink: nil (default) — explicitly no worktree
         )
-        forkedCard.manualOverrides.worktreePath = true  // fork from root sets this
+        forkedCard.manualOverrides.branchWatermark = 50000  // fork from root sets watermark
 
         let snapshot = CardReconciler.DiscoverySnapshot(
             sessions: [
@@ -907,9 +907,8 @@ struct CardReconcilerTests {
 
     @Test("Forked card (project root) does NOT get PR from session gitBranch")
     func forkedCardNoPRFromSessionBranch() {
-        // A forked card with manualOverrides.worktreePath = true should NOT
-        // be indexed by the session's baked-in gitBranch. The gitBranch belongs
-        // to the parent card's worktree, not this fork.
+        // A forked card with branchWatermark should NOT be indexed by the
+        // session's baked-in gitBranch. The gitBranch belongs to the parent.
         var forkedCard = Link(
             projectPath: "/project",
             column: .waiting,
@@ -917,7 +916,7 @@ struct CardReconcilerTests {
             sessionLink: SessionLink(sessionId: "forked-s1", sessionPath: "/p/forked.jsonl")
             // no worktreeLink — user chose "project root"
         )
-        forkedCard.manualOverrides.worktreePath = true
+        forkedCard.manualOverrides.branchWatermark = 50000
 
         let originalCard = Link(
             projectPath: "/project",
@@ -956,6 +955,102 @@ struct CardReconcilerTests {
         #expect(original.prLinks[0].number == 42)
     }
 
+    @Test("Card with branchWatermark: discoveredBranches ARE still indexed for PR matching")
+    func watermarkAllowsDiscoveredBranches() {
+        // discoveredBranches are post-watermark (old ones cleared at watermark time).
+        // They should still be indexed and matched to PRs.
+        var card = Link(
+            projectPath: "/project",
+            column: .inProgress,
+            source: .discovered,
+            sessionLink: SessionLink(sessionId: "s1", sessionPath: "/p/s1.jsonl")
+        )
+        card.manualOverrides.branchWatermark = 50000
+        card.discoveredBranches = ["feat-new"]  // found via incremental scan after watermark
+
+        let snapshot = CardReconciler.DiscoverySnapshot(
+            sessions: [
+                Session(id: "s1", projectPath: "/project",
+                        gitBranch: "feat-old", messageCount: 10, modifiedTime: .now,
+                        jsonlPath: "/p/s1.jsonl"),
+            ],
+            pullRequests: [
+                "feat-old": PullRequest(number: 1, title: "Old PR", state: "open", url: "url1", headRefName: "feat-old"),
+                "feat-new": PullRequest(number: 2, title: "New PR", state: "open", url: "url2", headRefName: "feat-new"),
+            ]
+        )
+
+        let result = CardReconciler.reconcile(existing: [card], snapshot: snapshot)
+        let updated = result.first(where: { $0.id == card.id })!
+
+        // "feat-old" from session.gitBranch is blocked (watermark set)
+        #expect(!updated.prLinks.contains(where: { $0.number == 1 }), "PR from blocked gitBranch should not be attached")
+        // "feat-new" from discoveredBranches is allowed (post-watermark)
+        #expect(updated.prLinks.contains(where: { $0.number == 2 }), "PR from discoveredBranches should be attached despite watermark")
+    }
+
+    @Test("Legacy worktreePath=true still blocks branch discovery (backward compat)")
+    func legacyWorktreePathStillBlocks() {
+        // Old cards may have worktreePath=true instead of branchWatermark.
+        // isBranchDiscoveryBlocked should still return true for these.
+        var card = Link(
+            projectPath: "/project",
+            column: .waiting,
+            source: .discovered,
+            sessionLink: SessionLink(sessionId: "s1", sessionPath: "/p/s1.jsonl")
+        )
+        card.manualOverrides.worktreePath = true  // legacy flag, no branchWatermark
+
+        let snapshot = CardReconciler.DiscoverySnapshot(
+            sessions: [
+                Session(id: "s1", projectPath: "/project",
+                        gitBranch: "feat-x", messageCount: 5, modifiedTime: .now,
+                        jsonlPath: "/p/s1.jsonl"),
+            ],
+            worktrees: ["/project": [
+                Worktree(path: "/project/.worktrees/feat-x", branch: "feat-x", isBare: false)
+            ]],
+            pullRequests: ["feat-x": PullRequest(number: 1, title: "PR", state: "open", url: "url", headRefName: "feat-x")]
+        )
+
+        let result = CardReconciler.reconcile(existing: [card], snapshot: snapshot)
+        let updated = result.first(where: { $0.id == card.id })!
+
+        #expect(updated.worktreeLink == nil, "Legacy worktreePath should still block worktree attachment")
+        #expect(updated.prLinks.isEmpty, "Legacy worktreePath should still block PR via gitBranch")
+    }
+
+    @Test("Clearing watermark allows full re-discovery")
+    func clearingWatermarkAllowsRediscovery() {
+        // After "Discover Branches", watermark and worktreePath are cleared.
+        // The card should be re-indexed by session.gitBranch.
+        let card = Link(
+            projectPath: "/project",
+            column: .inProgress,
+            source: .discovered,
+            sessionLink: SessionLink(sessionId: "s1", sessionPath: "/p/s1.jsonl")
+            // No watermark, no worktreePath — cleared by "Discover Branches"
+        )
+
+        let snapshot = CardReconciler.DiscoverySnapshot(
+            sessions: [
+                Session(id: "s1", projectPath: "/project",
+                        gitBranch: "feat-x", messageCount: 5, modifiedTime: .now,
+                        jsonlPath: "/p/s1.jsonl"),
+            ],
+            worktrees: ["/project": [
+                Worktree(path: "/project/.worktrees/feat-x", branch: "feat-x", isBare: false)
+            ]],
+            pullRequests: ["feat-x": PullRequest(number: 1, title: "PR", state: "open", url: "url", headRefName: "feat-x")]
+        )
+
+        let result = CardReconciler.reconcile(existing: [card], snapshot: snapshot)
+        let updated = result.first(where: { $0.id == card.id })!
+
+        #expect(updated.worktreeLink?.branch == "feat-x", "Without watermark, worktree should be attached")
+        #expect(updated.prLinks.count == 1, "Without watermark, PR should be matched")
+    }
+
     @Test("Project path filled from session when card has none")
     func projectPathFilledFromSession() {
         // Card has tmuxLink + matching project path context (same project)
@@ -978,5 +1073,76 @@ struct CardReconcilerTests {
         #expect(result.count == 1)
         #expect(result[0].sessionLink?.sessionId == "s1")
         #expect(result[0].projectPath == "/my/project")
+    }
+
+    // MARK: - Cross-repo worktree stability
+
+    @Test("Cross-repo discoveredBranches don't cause worktreeLink flipping")
+    func crossRepoWorktreeStability() {
+        // Card in langwatch repo has discoveredBranches from both langwatch and scenario repos.
+        // Two worktrees exist for different branches. The card's worktreeLink should stay stable
+        // (not flip between repos on each reconcile cycle).
+        let existing = [
+            Link(
+                id: "card-multi-repo",
+                projectPath: "/repos/langwatch",
+                column: .inProgress,
+                sessionLink: SessionLink(sessionId: "s1"),
+                worktreeLink: WorktreeLink(path: "/repos/langwatch/.claude/worktrees/fix-trigger", branch: "fix/approval-check-retrigger"),
+                discoveredBranches: ["fix/approval-check-retrigger", "fix/add-flaky-markers"],
+                discoveredRepos: ["fix/add-flaky-markers": "/repos/scenario"]
+            )
+        ]
+        let snapshot = CardReconciler.DiscoverySnapshot(
+            sessions: [Session(id: "s1", messageCount: 1, modifiedTime: .now)],
+            worktrees: [
+                "/repos/langwatch": [
+                    Worktree(path: "/repos/langwatch/.claude/worktrees/fix-trigger", branch: "refs/heads/fix/approval-check-retrigger", isBare: false)
+                ],
+                "/repos/scenario": [
+                    Worktree(path: "/repos/scenario/.claude/worktrees/herding-cloud", branch: "refs/heads/fix/add-flaky-markers", isBare: false)
+                ]
+            ]
+        )
+
+        let result = CardReconciler.reconcile(existing: existing, snapshot: snapshot)
+        let card = result.first { $0.id == "card-multi-repo" }!
+
+        // worktreeLink should stay on the langwatch branch (original), not flip to scenario
+        #expect(card.worktreeLink?.branch == "fix/approval-check-retrigger")
+        #expect(card.worktreeLink?.path == "/repos/langwatch/.claude/worktrees/fix-trigger")
+    }
+
+    @Test("Cross-repo worktree won't attach to card from wrong repo")
+    func crossRepoWorktreeWrongRepo() {
+        // Card in langwatch has a discoveredBranch that belongs to scenario.
+        // A worktree for that branch exists in scenario, but in a DIFFERENT repo
+        // than what discoveredRepos says — should NOT attach.
+        let existing = [
+            Link(
+                id: "card-no-wt",
+                projectPath: "/repos/langwatch",
+                column: .inProgress,
+                sessionLink: SessionLink(sessionId: "s1"),
+                discoveredBranches: ["branch-a"],
+                discoveredRepos: ["branch-a": "/repos/scenario"]
+            )
+        ]
+        let snapshot = CardReconciler.DiscoverySnapshot(
+            sessions: [Session(id: "s1", messageCount: 1, modifiedTime: .now)],
+            worktrees: [
+                // Worktree is in langwatch repo, but discoveredRepos says branch-a belongs to scenario
+                "/repos/langwatch": [
+                    Worktree(path: "/repos/langwatch/.claude/worktrees/wt-a", branch: "refs/heads/branch-a", isBare: false)
+                ]
+            ]
+        )
+
+        let result = CardReconciler.reconcile(existing: existing, snapshot: snapshot)
+        let card = result.first { $0.id == "card-no-wt" }!
+
+        // branch-a should NOT attach because discoveredRepos says it belongs to /repos/scenario
+        // but the worktree is in /repos/langwatch — repo mismatch
+        #expect(card.worktreeLink == nil)
     }
 }
