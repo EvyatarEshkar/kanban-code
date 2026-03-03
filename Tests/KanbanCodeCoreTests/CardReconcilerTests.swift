@@ -460,6 +460,31 @@ struct CardReconcilerTests {
         #expect(result[0].worktreeLink?.path == "/new/path")
     }
 
+    @Test("Worktree branch updated when Claude switches branch inside worktree")
+    func worktreeBranchRefreshed() {
+        let existing = [
+            Link(
+                column: .inProgress,
+                sessionLink: SessionLink(sessionId: "s1"),
+                worktreeLink: WorktreeLink(path: "/project/.worktrees/feat-original", branch: "feat-original")
+            )
+        ]
+        let snapshot = CardReconciler.DiscoverySnapshot(
+            sessions: [Session(id: "s1", gitBranch: "feat-original", messageCount: 1, modifiedTime: .now)],
+            worktrees: [
+                "/project": [
+                    // git worktree list --porcelain shows the NEW branch for the same path
+                    Worktree(path: "/project/.worktrees/feat-original", branch: "feat-renamed", isBare: false)
+                ]
+            ]
+        )
+
+        let result = CardReconciler.reconcile(existing: existing, snapshot: snapshot)
+        #expect(result.count == 1)
+        #expect(result[0].worktreeLink?.path == "/project/.worktrees/feat-original")
+        #expect(result[0].worktreeLink?.branch == "feat-renamed")
+    }
+
     // MARK: - PR matching
 
     @Test("PR linked to card via branch")

@@ -225,6 +225,28 @@ public enum CardReconciler {
             }
         }
 
+        // B1.5: Refresh worktree branches from snapshot.
+        // Claude may switch branches inside an existing worktree — detect this
+        // by matching on path and updating the branch if it changed.
+        for (_, link) in linksById {
+            guard let wtPath = link.worktreeLink?.path,
+                  let oldBranch = link.worktreeLink?.branch else { continue }
+            for (_, worktrees) in snapshot.worktrees {
+                if let wt = worktrees.first(where: { $0.path == wtPath }),
+                   let newBranch = wt.branch?.replacingOccurrences(of: "refs/heads/", with: ""),
+                   newBranch != oldBranch {
+                    var updated = link
+                    updated.worktreeLink?.branch = newBranch
+                    linksById[link.id] = updated
+                    // Update branch index
+                    cardIdsByBranch[oldBranch]?.removeAll { $0 == link.id }
+                    cardIdsByBranch[newBranch, default: []].append(link.id)
+                    KanbanCodeLog.info("reconciler", "Branch changed on worktree \(wtPath): \(oldBranch) → \(newBranch)")
+                    break
+                }
+            }
+        }
+
         // B2. Absorb orphan worktree cards (worktreeLink but no session/name/manual)
         // into real cards on the same branch. Multiple sessions on the same branch
         // are legitimate (forked tasks) and must NOT be merged.
