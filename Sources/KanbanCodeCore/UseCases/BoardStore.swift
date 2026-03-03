@@ -285,6 +285,7 @@ public enum Reducer {
             }
             link.tmuxLink = TmuxLink(sessionName: tmuxName, extraSessions: extras.isEmpty ? nil : extras)
             link.column = .inProgress
+            link.manualOverrides.column = false // Let automatic assignment take over
             link.isLaunching = true
             link.updatedAt = .now
             state.links[cardId] = link
@@ -303,6 +304,7 @@ public enum Reducer {
             }
             link.tmuxLink = TmuxLink(sessionName: tmuxName, extraSessions: extras.isEmpty ? nil : extras)
             link.column = .inProgress
+            link.manualOverrides.column = false // Let automatic assignment take over
             link.isLaunching = true
             link.updatedAt = .now
             state.links[cardId] = link
@@ -882,6 +884,7 @@ public final class BoardStore: @unchecked Sendable {
     // Dependencies for reconciliation
     private var isReconciling = false
     private var lastGHLookup: ContinuousClock.Instant = .now - .seconds(600)
+    private var ghRateLimitedUntil: ContinuousClock.Instant = .now
     public var appIsActive: Bool = true
     private let discovery: SessionDiscovery
     private let coordinationStore: CoordinationStore
@@ -1082,15 +1085,16 @@ public final class BoardStore: @unchecked Sendable {
             }
 
             // Fetch PR data via targeted GraphQL — concurrent across repos (max 5)
-            // Throttle: every reconcile cycle when active, every 5min when backgrounded/hidden.
-            let ghInterval: Duration = appIsActive ? .seconds(0) : .seconds(300)
+            // Throttle: 30s when active, 5min when backgrounded/hidden, 5min after rate limit.
+            let ghInterval: Duration = ghRateLimitedUntil > .now ? .seconds(300)
+                : appIsActive ? .seconds(30) : .seconds(300)
             let shouldFetchPRs = ContinuousClock.now - lastGHLookup >= ghInterval
             var pullRequests: [String: PullRequest] = [:]  // branch → PR for reconciler
             var prsByRepoAndNumber: [String: [Int: PullRequest]] = [:]  // repo → number → PR
             if let ghAdapter, shouldFetchPRs {
                 let t = ContinuousClock.now
                 let allRepos = Set(branchesByRepo.keys).union(prNumbersByRepo.keys)
-                typealias PRResult = (String, [String: PullRequest], [Int: PullRequest])
+                typealias PRResult = (String, [String: PullRequest], [Int: PullRequest], Bool)
                 let results: [PRResult] = await withTaskGroup(of: PRResult.self) { group in
                     var pending = 0
                     var collected: [PRResult] = []
@@ -1107,12 +1111,18 @@ public final class BoardStore: @unchecked Sendable {
 
                         group.addTask {
                             let tBatch = ContinuousClock.now
-                            let (byBranch, byNumber) = (try? await ghAdapter.batchPRLookup(
-                                repoRoot: repoRoot, branches: branches, prNumbers: numbers
-                            )) ?? ([:], [:])
-                            let repoName = (repoRoot as NSString).lastPathComponent
-                            KanbanCodeLog.info("reconcile", "  batchPRLookup(\(repoName)): \(tBatch.duration(to: .now)) (\(branches.count) branches, \(numbers.count) PRs)")
-                            return (repoRoot, byBranch, byNumber)
+                            do {
+                                let (byBranch, byNumber) = try await ghAdapter.batchPRLookup(
+                                    repoRoot: repoRoot, branches: branches, prNumbers: numbers
+                                )
+                                let repoName = (repoRoot as NSString).lastPathComponent
+                                KanbanCodeLog.info("reconcile", "  batchPRLookup(\(repoName)): \(tBatch.duration(to: .now)) (\(branches.count) branches, \(numbers.count) PRs)")
+                                return (repoRoot, byBranch, byNumber, false)
+                            } catch is GhCliError {
+                                return (repoRoot, [:], [:], true)
+                            } catch {
+                                return (repoRoot, [:], [:], false)
+                            }
                         }
                         pending += 1
                     }
@@ -1120,13 +1130,19 @@ public final class BoardStore: @unchecked Sendable {
                     return collected
                 }
 
-                for (repoRoot, byBranch, byNumber) in results {
+                var hitRateLimit = false
+                for (repoRoot, byBranch, byNumber, rateLimited) in results {
+                    if rateLimited { hitRateLimit = true }
                     for (branch, pr) in byBranch {
                         pullRequests[branch] = pr
                     }
                     if !byNumber.isEmpty {
                         prsByRepoAndNumber[repoRoot] = byNumber
                     }
+                }
+                if hitRateLimit {
+                    ghRateLimitedUntil = .now + .seconds(300)
+                    dispatch(.setError("GitHub API rate limit exceeded — pausing PR lookups for 5 minutes"))
                 }
                 let totalByNumber = prsByRepoAndNumber.values.reduce(0) { $0 + $1.count }
                 KanbanCodeLog.info("reconcile", "PR lookup: \(t.duration(to: .now)) (\(pullRequests.count) by branch, \(totalByNumber) by number, \(allRepos.count) repos)")

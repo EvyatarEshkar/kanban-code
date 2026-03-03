@@ -269,6 +269,11 @@ public final class GhCliAdapter: PRTrackerPort, @unchecked Sendable {
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let dataObj = root["data"] as? [String: Any],
               let repo = dataObj["repository"] as? [String: Any] else {
+            let combined = result.stderr + result.stdout
+            if combined.localizedCaseInsensitiveContains("rate limit") || combined.contains("RATE_LIMITED") {
+                KanbanCodeLog.warn("gh", "batchPRLookup hit rate limit")
+                throw GhCliError.rateLimited
+            }
             KanbanCodeLog.warn("gh", "batchPRLookup GraphQL failed: \(result.stderr.prefix(200))")
             return ([:], [:])
         }
@@ -369,6 +374,17 @@ public final class GhCliAdapter: PRTrackerPort, @unchecked Sendable {
             let body = item["body"] as? String
             let labels = (item["labels"] as? [[String: Any]])?.compactMap { $0["name"] as? String } ?? []
             return GitHubIssue(number: number, title: title, body: body, url: url, labels: labels)
+        }
+    }
+}
+
+public enum GhCliError: Error, LocalizedError {
+    case rateLimited
+
+    public var errorDescription: String? {
+        switch self {
+        case .rateLimited:
+            return "GitHub API rate limit exceeded — pausing PR lookups for 5 minutes"
         }
     }
 }
