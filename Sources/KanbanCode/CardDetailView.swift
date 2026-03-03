@@ -1071,7 +1071,15 @@ struct CardDetailView: View {
         menu.addActionItem("Copy Card ID", image: "number") { [self] in copyToClipboard(card.id) }
 
         if let sessionId = card.link.sessionLink?.sessionId {
-            menu.addActionItem("Copy Session ID", image: "brain") { [self] in copyToClipboard(sessionId) }
+            let sessionItem = menu.addActionItem("Copy Session ID") { [self] in copyToClipboard(sessionId) }
+            if let clawdImg = ClawdIcon.menuImage {
+                let sized = NSImage(size: NSSize(width: 16, height: 16))
+                sized.lockFocus()
+                clawdImg.draw(in: NSRect(x: 0, y: 0, width: 16, height: 16))
+                sized.unlockFocus()
+                sized.isTemplate = true
+                sessionItem.image = sized
+            }
         }
 
         if let tmux = card.link.tmuxLink?.sessionName {

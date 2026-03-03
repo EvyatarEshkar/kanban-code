@@ -235,8 +235,13 @@ struct ClawdIcon: View {
                 ?? Bundle.appResources.url(forResource: "clawd", withExtension: "png", subdirectory: "Resources") else {
             return nil
         }
-        return NSImage(contentsOf: url)
+        let img = NSImage(contentsOf: url)
+        img?.isTemplate = true
+        return img
     }()
+
+    /// NSImage suitable for use in NSMenuItem (template for dark mode support).
+    static var menuImage: NSImage? { sourceImage }
 
     var body: some View {
         if let src = Self.sourceImage {
