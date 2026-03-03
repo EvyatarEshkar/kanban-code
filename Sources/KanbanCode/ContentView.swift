@@ -189,7 +189,7 @@ struct ContentView: View {
                 onRename: { name in
                     store.dispatch(.renameCard(cardId: card.id, name: name))
                 },
-                onFork: { forkCard(cardId: card.id) },
+                onFork: { keepWorktree in forkCard(cardId: card.id, keepWorktree: keepWorktree) },
                 onDismiss: { store.dispatch(.selectCard(cardId: nil)) },
                 onUnlink: { linkType in
                     let actionType: Action.LinkType
@@ -1417,12 +1417,7 @@ struct ContentView: View {
             archiveCard(cardId: cardId)
 
         case .backlog:
-            if card.link.sessionLink != nil {
-                // Has a session — can't go back to backlog, suggest archiving
-                store.dispatch(.setError("Card has a session — archive it instead to move it out of the board"))
-            } else {
-                store.dispatch(.moveCard(cardId: cardId, to: column))
-            }
+            store.dispatch(.moveCard(cardId: cardId, to: column))
 
         case .waiting:
             store.dispatch(.moveCard(cardId: cardId, to: column))
@@ -1776,22 +1771,37 @@ struct ContentView: View {
         )
     }
 
-    private func forkCard(cardId: String) {
+    private func forkCard(cardId: String, keepWorktree: Bool = false) {
         guard let card = store.state.cards.first(where: { $0.id == cardId }),
               let sessionPath = card.link.sessionLink?.sessionPath else { return }
         Task {
             do {
-                let newSessionId = try await store.sessionStore.forkSession(sessionPath: sessionPath)
-                let dir = (sessionPath as NSString).deletingLastPathComponent
+                // Determine the project path and session directory for the fork.
+                // When forking from a worktree (and not keeping it), use the parent project.
+                var forkProjectPath = card.link.projectPath
+                var targetDir: String? = nil
+                if !keepWorktree, let pp = card.link.projectPath,
+                   let range = pp.range(of: "/.claude/worktrees/") {
+                    forkProjectPath = String(pp[..<range.lowerBound])
+                    // Place the session file in the parent project's session dir
+                    let encoded = forkProjectPath!.replacingOccurrences(of: "/", with: "-")
+                    let home = NSHomeDirectory()
+                    targetDir = "\(home)/.claude/projects/\(encoded)"
+                }
+
+                let newSessionId = try await store.sessionStore.forkSession(
+                    sessionPath: sessionPath, targetDirectory: targetDir
+                )
+                let dir = targetDir ?? (sessionPath as NSString).deletingLastPathComponent
                 let newPath = (dir as NSString).appendingPathComponent("\(newSessionId).jsonl")
                 let newLink = Link(
                     name: (card.link.name ?? card.link.displayTitle) + " (fork)",
-                    projectPath: card.link.projectPath,
+                    projectPath: forkProjectPath,
                     column: .waiting,
                     lastActivity: .now,
                     source: .discovered,
                     sessionLink: SessionLink(sessionId: newSessionId, sessionPath: newPath),
-                    worktreeLink: card.link.worktreeLink
+                    worktreeLink: keepWorktree ? card.link.worktreeLink : nil
                 )
                 store.dispatch(.createManualTask(newLink))
                 store.dispatch(.selectCard(cardId: newLink.id))

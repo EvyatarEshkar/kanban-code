@@ -45,7 +45,7 @@ struct CardDetailView: View {
     let card: KanbanCodeCard
     var onResume: () -> Void = {}
     var onRename: (String) -> Void = { _ in }
-    var onFork: () -> Void = {}
+    var onFork: (_ keepWorktree: Bool) -> Void = { _ in }
     var onDismiss: () -> Void = {}
     var onUnlink: (Action.LinkType) -> Void = { _ in }
     var onAddBranch: (String) -> Void = { _ in }
@@ -108,7 +108,7 @@ struct CardDetailView: View {
 
     let sessionStore: SessionStore
 
-    init(card: KanbanCodeCard, sessionStore: SessionStore = ClaudeCodeSessionStore(), onResume: @escaping () -> Void = {}, onRename: @escaping (String) -> Void = { _ in }, onFork: @escaping () -> Void = {}, onDismiss: @escaping () -> Void = {}, onUnlink: @escaping (Action.LinkType) -> Void = { _ in }, onAddBranch: @escaping (String) -> Void = { _ in }, onAddIssue: @escaping (Int) -> Void = { _ in }, onCleanupWorktree: @escaping () -> Void = {}, onDeleteCard: @escaping () -> Void = {}, onCreateTerminal: @escaping () -> Void = {}, onKillTerminal: @escaping (String) -> Void = { _ in }, onCancelLaunch: @escaping () -> Void = {}, onDiscover: @escaping () -> Void = {}, focusTerminal: Binding<Bool> = .constant(false)) {
+    init(card: KanbanCodeCard, sessionStore: SessionStore = ClaudeCodeSessionStore(), onResume: @escaping () -> Void = {}, onRename: @escaping (String) -> Void = { _ in }, onFork: @escaping (_ keepWorktree: Bool) -> Void = { _ in }, onDismiss: @escaping () -> Void = {}, onUnlink: @escaping (Action.LinkType) -> Void = { _ in }, onAddBranch: @escaping (String) -> Void = { _ in }, onAddIssue: @escaping (Int) -> Void = { _ in }, onCleanupWorktree: @escaping () -> Void = {}, onDeleteCard: @escaping () -> Void = {}, onCreateTerminal: @escaping () -> Void = {}, onKillTerminal: @escaping (String) -> Void = { _ in }, onCancelLaunch: @escaping () -> Void = {}, onDiscover: @escaping () -> Void = {}, focusTerminal: Binding<Bool> = .constant(false)) {
         self.card = card
         self.sessionStore = sessionStore
         self.onResume = onResume
@@ -432,7 +432,10 @@ struct CardDetailView: View {
         }
         .alert("Fork Session?", isPresented: $showForkConfirm) {
             Button("Cancel", role: .cancel) {}
-            Button("Fork") { onFork() }
+            if card.link.worktreeLink != nil {
+                Button("Fork to same worktree") { onFork(true) }
+            }
+            Button("Fork") { onFork(false) }
         } message: {
             Text("This creates a duplicate session you can resume independently.")
         }

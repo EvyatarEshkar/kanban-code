@@ -9,14 +9,17 @@ public final class ClaudeCodeSessionStore: SessionStore, @unchecked Sendable {
         try await TranscriptReader.readTurns(from: sessionPath)
     }
 
-    public func forkSession(sessionPath: String) async throws -> String {
+    public func forkSession(sessionPath: String, targetDirectory: String? = nil) async throws -> String {
         let fileManager = FileManager.default
         guard fileManager.fileExists(atPath: sessionPath) else {
             throw SessionStoreError.fileNotFound(sessionPath)
         }
 
         let newSessionId = UUID().uuidString
-        let dir = (sessionPath as NSString).deletingLastPathComponent
+        let dir = targetDirectory ?? (sessionPath as NSString).deletingLastPathComponent
+        if let targetDirectory, !fileManager.fileExists(atPath: targetDirectory) {
+            try fileManager.createDirectory(atPath: targetDirectory, withIntermediateDirectories: true)
+        }
         let newPath = (dir as NSString).appendingPathComponent("\(newSessionId).jsonl")
 
         // Read, replace session IDs, write
