@@ -10,8 +10,8 @@
 </p>
 
 <p align="center">
-  <a href="#features">Features</a> ·
   <a href="#installation">Installation</a> ·
+  <a href="#features">Features</a> ·
   <a href="#getting-started">Getting Started</a> ·
   <a href="#architecture">Architecture</a> ·
   <a href="#license">License</a>
@@ -26,6 +26,22 @@
 A native macOS app for running multiple Claude Code agents in parallel. Each task is a card on a Kanban board that automatically links your Claude session, git worktree, tmux terminal, and GitHub PR together — cards flow from backlog to done as Claude works, opens PRs, and gets them merged. Push notifications on your phone when agents need attention, remote execution to offload work to a server, and sleep prevention to keep your Mac awake while agents run.
 
 Kanban Code combines the lessons learned from [claude-resume](https://github.com/langwatch/claude-resume), [claude-remote](https://github.com/langwatch/claude-remote), [git-orchard](https://github.com/drewdrewthis/git-orchard), [claude-pushover](https://github.com/langwatch/claude-pushover), and [cc-amphetamine](https://github.com/rogeriochaves/cc-amphetamine) into one unified experience.
+
+## Installation
+
+### Download
+
+Grab the latest `.app` from [**Releases**](https://github.com/langwatch/kanban-code/releases/latest), unzip, and drag to Applications.
+
+> Requires **macOS 26** (Tahoe) and [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI installed.
+
+### Build from Source
+
+```bash
+git clone https://github.com/langwatch/kanban-code.git
+cd kanban-code
+make run-app
+```
 
 ## Features
 
@@ -111,15 +127,7 @@ Configure multiple projects, each with its own GitHub filters, prompt templates,
 - Drag and drop between columns
 - Context menus on every card
 
-## Installation
-
-### Requirements
-
-- **macOS 26** (Tahoe) or later
-- **Swift 6.2+** toolchain
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI installed
-
-### Optional Dependencies
+## Optional Dependencies
 
 These unlock additional features. Kanban Code works without them — it's all progressive enhancement.
 
@@ -130,28 +138,6 @@ These unlock additional features. Kanban Code works without them — it's all pr
 | [`mutagen`](https://mutagen.io/) | Remote execution with bidirectional file sync |
 | [Amphetamine](https://apps.apple.com/app/amphetamine/id937984704) | Prevent Mac sleep while agents are working |
 | [Pushover](https://pushover.net/) | Push notifications to phone and Apple Watch |
-
-### Download
-
-Grab the latest `.app` from [**Releases**](https://github.com/langwatch/kanban-code/releases/latest), unzip, and drag to Applications.
-
-### Build from Source
-
-```bash
-git clone https://github.com/langwatch/kanban-code.git
-cd kanban-code
-make run-app
-```
-
-This builds the app, creates `KanbanCode.app` in `build/`, and launches it.
-
-For development:
-
-```bash
-swift build          # compile
-swift test           # run all tests
-swift run KanbanCode # run without .app bundle
-```
 
 ## Getting Started
 
