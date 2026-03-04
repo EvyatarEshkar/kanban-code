@@ -54,6 +54,7 @@ struct ContentView: View {
     @State private var quitOwnedSessions: [TmuxSession] = []
     @AppStorage("killTmuxOnQuit") private var killTmuxOnQuit = true
     @State private var showAddFromPath = false
+    @State private var isDroppingFolder = false
     @State private var addFromPathText = ""
     @State private var launchConfig: LaunchConfig?
     @State private var syncStatuses: [String: SyncStatus] = [:]
@@ -112,6 +113,10 @@ struct ContentView: View {
         )
 
         let launch = LaunchSession(tmux: tmux)
+
+        orch.setDispatch { [weak boardStore] action in
+            boardStore?.dispatch(action)
+        }
 
         _store = State(initialValue: boardStore)
         _orchestrator = State(initialValue: orch)
@@ -232,6 +237,18 @@ struct ContentView: View {
                 onCancelLaunch: {
                     store.dispatch(.cancelLaunch(cardId: card.id))
                 },
+                onAddQueuedPrompt: { prompt in
+                    store.dispatch(.addQueuedPrompt(cardId: card.id, prompt: prompt))
+                },
+                onUpdateQueuedPrompt: { promptId, body, sendAuto in
+                    store.dispatch(.updateQueuedPrompt(cardId: card.id, promptId: promptId, body: body, sendAutomatically: sendAuto))
+                },
+                onRemoveQueuedPrompt: { promptId in
+                    store.dispatch(.removeQueuedPrompt(cardId: card.id, promptId: promptId))
+                },
+                onSendQueuedPrompt: { promptId in
+                    store.dispatch(.sendQueuedPrompt(cardId: card.id, promptId: promptId))
+                },
                 onDiscover: {
                     Task {
                         store.dispatch(.setBusy(cardId: card.id, busy: true))
@@ -288,6 +305,35 @@ struct ContentView: View {
                 }
             }
             .animation(.easeInOut(duration: 0.15), value: showSearch)
+            .overlay {
+                FolderDropZone(isTargeted: $isDroppingFolder) { url in
+                    addDroppedFolder(url)
+                }
+                .allowsHitTesting(isDroppingFolder)
+            }
+            .overlay {
+                if isDroppingFolder {
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(style: StrokeStyle(lineWidth: 3, dash: [8, 4]))
+                        .foregroundStyle(Color.accentColor)
+                        .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                        .overlay {
+                            VStack(spacing: 8) {
+                                Image(systemName: "folder.badge.plus")
+                                    .font(.system(size: 40))
+                                    .foregroundStyle(Color.accentColor)
+                                Text("Drop to add project")
+                                    .font(.title3.weight(.medium))
+                                    .foregroundStyle(.primary)
+                            }
+                        }
+                        .padding(20)
+                        .ignoresSafeArea()
+                        .allowsHitTesting(false)
+                        .transition(.opacity)
+                }
+            }
+            .animation(.easeInOut(duration: 0.15), value: isDroppingFolder)
     }
 
     private var boardWithSheets: some View {
@@ -570,6 +616,10 @@ struct ContentView: View {
                 Task {
                     await store.reconcile()
                     applyAppearance()
+                    // Refresh notifier so Pushover credentials changes take effect immediately
+                    let pushover = Self.loadPushoverConfig()
+                    let newNotifier = CompositeNotifier(primary: pushover, fallback: MacOSNotificationClient())
+                    orchestrator.updateNotifier(newNotifier)
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .kanbanCodeQuitRequested)) { _ in
@@ -1299,6 +1349,16 @@ struct ContentView: View {
         let projectIndex = index - 1
         guard projectIndex < visibleProjects.count else { return }
         setSelectedProject(visibleProjects[projectIndex].path)
+    }
+
+    private func addDroppedFolder(_ url: URL) {
+        let path = url.path
+        let project = Project(path: path)
+        Task {
+            try? await settingsStore.addProject(project)
+            await store.reconcile()
+            setSelectedProject(path)
+        }
     }
 
     private func addProjectViaFolderPicker() {
