@@ -404,8 +404,11 @@ public final class GhCliAdapter: PRTrackerPort, @unchecked Sendable {
             arguments: arguments,
             currentDirectory: repoRoot
         )
-        if result.succeeded {
-            return .success
+        let output = (result.stdout + " " + result.stderr).lowercased()
+        if result.succeeded || output.contains("merged") || output.contains("pull request") && output.contains("merge") {
+            // Merge succeeded — branch deletion failure is non-fatal
+            let warning = result.succeeded ? nil : result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+            return .success(warning: warning)
         } else {
             let msg = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
             return .failure(msg)
@@ -414,7 +417,7 @@ public final class GhCliAdapter: PRTrackerPort, @unchecked Sendable {
 }
 
 public enum MergeResult: Sendable {
-    case success
+    case success(warning: String? = nil)
     case failure(String)
 }
 

@@ -149,6 +149,7 @@ public enum Action: Sendable {
     case addIssueLinkToCard(cardId: String, issueNumber: Int)
     case addPRToCard(cardId: String, prNumber: Int)
     case moveCardToProject(cardId: String, projectPath: String)
+    case markPRMerged(cardId: String, prNumber: Int)
     case mergeCards(sourceId: String, targetId: String)
 
     // Async completions
@@ -486,6 +487,15 @@ public enum Reducer {
                 link.manualOverrides.dismissedPRs = nil
             }
             link.manualOverrides.prLink = false
+            link.updatedAt = .now
+            state.links[cardId] = link
+            return [.upsertLink(link)]
+
+        case .markPRMerged(let cardId, let prNumber):
+            guard var link = state.links[cardId] else { return [] }
+            if let idx = link.prLinks.firstIndex(where: { $0.number == prNumber }) {
+                link.prLinks[idx].status = .merged
+            }
             link.updatedAt = .now
             state.links[cardId] = link
             return [.upsertLink(link)]

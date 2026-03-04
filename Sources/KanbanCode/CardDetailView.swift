@@ -56,6 +56,7 @@ struct CardDetailView: View {
     var onDeleteCard: () -> Void = {}
     var onCreateTerminal: () -> Void = {}
     var onKillTerminal: (String) -> Void = { _ in }
+    var onPRMerged: (Int) -> Void = { _ in }
     var onCancelLaunch: () -> Void = {}
     var onDiscover: () -> Void = {}
     var availableProjects: [(name: String, path: String)] = []
@@ -1131,8 +1132,12 @@ struct CardDetailView: View {
                 let result = try await gh.mergePR(repoRoot: repoRoot, prNumber: pr.number, commandTemplate: settings.github.mergeCommand)
                 isMerging = false
                 switch result {
-                case .success:
+                case .success(let warning):
                     copyToast = "PR #\(pr.number) merged"
+                    onPRMerged(pr.number)
+                    if let warning, !warning.isEmpty {
+                        KanbanCodeLog.info("merge", "PR #\(pr.number) merged with warning: \(warning)")
+                    }
                 case .failure(let msg):
                     mergeError = msg
                 }
