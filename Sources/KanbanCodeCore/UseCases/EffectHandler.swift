@@ -86,6 +86,12 @@ public actor EffectHandler {
                 KanbanCodeLog.warn("effect", "moveSessionFile failed: \(error)")
                 await dispatch(.setError("Move failed: \(error.localizedDescription)"))
             }
+        case .sendPromptToTmux(let sessionName, let promptBody):
+            do {
+                try await tmuxAdapter?.sendPrompt(to: sessionName, text: promptBody)
+            } catch {
+                KanbanCodeLog.warn("effect", "sendPromptToTmux failed: \(error)")
+            }
         }
     }
 }

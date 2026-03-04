@@ -104,6 +104,19 @@ public struct IssueLink: Codable, Sendable, Equatable {
     }
 }
 
+/// A prompt queued to be sent to a Claude session.
+public struct QueuedPrompt: Codable, Sendable, Equatable, Identifiable {
+    public let id: String
+    public var body: String
+    public var sendAutomatically: Bool
+
+    public init(id: String = KSUID.generate(prefix: "prompt"), body: String, sendAutomatically: Bool = true) {
+        self.id = id
+        self.body = body
+        self.sendAutomatically = sendAutomatically
+    }
+}
+
 // MARK: - Card Label
 
 /// The primary label shown on a card, derived from which links are present.
@@ -140,6 +153,7 @@ public struct Link: Identifiable, Codable, Sendable {
     public var worktreeLink: WorktreeLink?
     public var prLinks: [PRLink]
     public var issueLink: IssueLink?
+    public var queuedPrompts: [QueuedPrompt]?
 
     /// Branches discovered by scanning the conversation for `git push` commands.
     /// nil = not yet scanned; empty = scanned but no branches found.
@@ -248,6 +262,7 @@ public struct Link: Identifiable, Codable, Sendable {
         worktreeLink: WorktreeLink? = nil,
         prLinks: [PRLink] = [],
         issueLink: IssueLink? = nil,
+        queuedPrompts: [QueuedPrompt]? = nil,
         isRemote: Bool = false,
         isLaunching: Bool? = nil,
         discoveredBranches: [String]? = nil,
@@ -269,6 +284,7 @@ public struct Link: Identifiable, Codable, Sendable {
         self.worktreeLink = worktreeLink
         self.prLinks = prLinks
         self.issueLink = issueLink
+        self.queuedPrompts = queuedPrompts
         self.isRemote = isRemote
         self.isLaunching = isLaunching
         self.discoveredBranches = discoveredBranches
@@ -283,7 +299,7 @@ public struct Link: Identifiable, Codable, Sendable {
         case manualOverrides, manuallyArchived, source, promptBody, isRemote, isLaunching
         case discoveredBranches, discoveredRepos
         // Typed links (new nested format)
-        case sessionLink, tmuxLink, worktreeLink, prLinks, issueLink
+        case sessionLink, tmuxLink, worktreeLink, prLinks, issueLink, queuedPrompts
         // Old format keys (for reading legacy format)
         case prLink
         case sessionId, sessionPath, worktreePath, worktreeBranch
@@ -367,6 +383,8 @@ public struct Link: Identifiable, Codable, Sendable {
                 promptBody = try c.decodeIfPresent(String.self, forKey: .issueBody)
             }
         }
+
+        queuedPrompts = try c.decodeIfPresent([QueuedPrompt].self, forKey: .queuedPrompts)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -396,6 +414,7 @@ public struct Link: Identifiable, Codable, Sendable {
             try c.encode(prLinks, forKey: .prLinks)
         }
         try c.encodeIfPresent(issueLink, forKey: .issueLink)
+        try c.encodeIfPresent(queuedPrompts, forKey: .queuedPrompts)
     }
 }
 

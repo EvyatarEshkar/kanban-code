@@ -58,6 +58,10 @@ struct CardDetailView: View {
     var onKillTerminal: (String) -> Void = { _ in }
     var onPRMerged: (Int) -> Void = { _ in }
     var onCancelLaunch: () -> Void = {}
+    var onAddQueuedPrompt: (QueuedPrompt) -> Void = { _ in }
+    var onUpdateQueuedPrompt: (String, String, Bool) -> Void = { _, _, _ in } // promptId, body, sendAuto
+    var onRemoveQueuedPrompt: (String) -> Void = { _ in }
+    var onSendQueuedPrompt: (String) -> Void = { _ in }
     var onDiscover: () -> Void = {}
     var availableProjects: [(name: String, path: String)] = []
     var onMoveToProject: (String) -> Void = { _ in }
@@ -96,6 +100,9 @@ struct CardDetailView: View {
     @State private var isMerging = false
     @State private var mergeError: String?
 
+    // Queued prompts
+    @State private var showQueuedPromptDialog = false
+    @State private var editingQueuedPrompt: QueuedPrompt?
 
     // File watcher for real-time history
     @State private var historyWatcherFD: Int32 = -1
@@ -116,7 +123,7 @@ struct CardDetailView: View {
 
     let sessionStore: SessionStore
 
-    init(card: KanbanCodeCard, sessionStore: SessionStore = ClaudeCodeSessionStore(), onResume: @escaping () -> Void = {}, onRename: @escaping (String) -> Void = { _ in }, onFork: @escaping (_ keepWorktree: Bool) -> Void = { _ in }, onDismiss: @escaping () -> Void = {}, onUnlink: @escaping (Action.LinkType) -> Void = { _ in }, onAddBranch: @escaping (String) -> Void = { _ in }, onAddIssue: @escaping (Int) -> Void = { _ in }, onAddPR: @escaping (Int) -> Void = { _ in }, onCleanupWorktree: @escaping () -> Void = {}, canCleanupWorktree: Bool = true, onDeleteCard: @escaping () -> Void = {}, onCreateTerminal: @escaping () -> Void = {}, onKillTerminal: @escaping (String) -> Void = { _ in }, onPRMerged: @escaping (Int) -> Void = { _ in }, onCancelLaunch: @escaping () -> Void = {}, onDiscover: @escaping () -> Void = {}, availableProjects: [(name: String, path: String)] = [], onMoveToProject: @escaping (String) -> Void = { _ in }, focusTerminal: Binding<Bool> = .constant(false)) {
+    init(card: KanbanCodeCard, sessionStore: SessionStore = ClaudeCodeSessionStore(), onResume: @escaping () -> Void = {}, onRename: @escaping (String) -> Void = { _ in }, onFork: @escaping (_ keepWorktree: Bool) -> Void = { _ in }, onDismiss: @escaping () -> Void = {}, onUnlink: @escaping (Action.LinkType) -> Void = { _ in }, onAddBranch: @escaping (String) -> Void = { _ in }, onAddIssue: @escaping (Int) -> Void = { _ in }, onAddPR: @escaping (Int) -> Void = { _ in }, onCleanupWorktree: @escaping () -> Void = {}, canCleanupWorktree: Bool = true, onDeleteCard: @escaping () -> Void = {}, onCreateTerminal: @escaping () -> Void = {}, onKillTerminal: @escaping (String) -> Void = { _ in }, onPRMerged: @escaping (Int) -> Void = { _ in }, onCancelLaunch: @escaping () -> Void = {}, onAddQueuedPrompt: @escaping (QueuedPrompt) -> Void = { _ in }, onUpdateQueuedPrompt: @escaping (String, String, Bool) -> Void = { _, _, _ in }, onRemoveQueuedPrompt: @escaping (String) -> Void = { _ in }, onSendQueuedPrompt: @escaping (String) -> Void = { _ in }, onDiscover: @escaping () -> Void = {}, availableProjects: [(name: String, path: String)] = [], onMoveToProject: @escaping (String) -> Void = { _ in }, focusTerminal: Binding<Bool> = .constant(false)) {
         self.card = card
         self.sessionStore = sessionStore
         self.onResume = onResume
@@ -134,6 +141,10 @@ struct CardDetailView: View {
         self.onKillTerminal = onKillTerminal
         self.onPRMerged = onPRMerged
         self.onCancelLaunch = onCancelLaunch
+        self.onAddQueuedPrompt = onAddQueuedPrompt
+        self.onUpdateQueuedPrompt = onUpdateQueuedPrompt
+        self.onRemoveQueuedPrompt = onRemoveQueuedPrompt
+        self.onSendQueuedPrompt = onSendQueuedPrompt
         self.onDiscover = onDiscover
         self.availableProjects = availableProjects
         self.onMoveToProject = onMoveToProject
@@ -475,6 +486,19 @@ struct CardDetailView: View {
                 onRename: onRename
             )
         }
+        .sheet(isPresented: $showQueuedPromptDialog) {
+            QueuedPromptDialog(
+                isPresented: $showQueuedPromptDialog,
+                existingPrompt: editingQueuedPrompt,
+                onSave: { body, sendAuto in
+                    if let existing = editingQueuedPrompt {
+                        onUpdateQueuedPrompt(existing.id, body, sendAuto)
+                    } else {
+                        onAddQueuedPrompt(QueuedPrompt(body: body, sendAutomatically: sendAuto))
+                    }
+                }
+            )
+        }
         .alert("Fork Session?", isPresented: $showForkConfirm) {
             Button("Cancel", role: .cancel) {}
             if card.link.worktreeLink != nil {
@@ -595,6 +619,21 @@ struct CardDetailView: View {
                         .buttonStyle(.bordered)
                         .controlSize(.small)
                         .help("Copy: tmux attach -t \(activeTmux)")
+
+                        Button {
+                            showQueuedPromptDialog = true
+                            editingQueuedPrompt = nil
+                        } label: {
+                            HStack(spacing: 3) {
+                                Image(systemName: "text.badge.plus")
+                                    .font(.caption2)
+                                Text("Queue Prompt")
+                                    .font(.caption)
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .help("Queue a prompt to send to Claude later")
                     }
                 }
                 .padding(.leading, 16)
@@ -602,6 +641,20 @@ struct CardDetailView: View {
                 .padding(.vertical, 4)
 
                 Divider()
+
+                // Queued prompts bar
+                if let prompts = card.link.queuedPrompts, !prompts.isEmpty {
+                    QueuedPromptsBar(
+                        prompts: prompts,
+                        onSendNow: { promptId in onSendQueuedPrompt(promptId) },
+                        onEdit: { prompt in
+                            editingQueuedPrompt = prompt
+                            showQueuedPromptDialog = true
+                        },
+                        onRemove: { promptId in onRemoveQueuedPrompt(promptId) }
+                    )
+                    Divider()
+                }
 
                 // Content area: single TerminalContainerView + overlay for non-terminal states
                 ZStack {

@@ -83,6 +83,19 @@ public final class TmuxAdapter: TmuxManagerPort, @unchecked Sendable {
         }
     }
 
+    public func sendPrompt(to sessionName: String, text: String) async throws {
+        // Send text literally (-l avoids interpreting special keys)
+        let _ = try await ShellCommand.run(
+            tmuxPath,
+            arguments: ["send-keys", "-t", sessionName, "-l", text]
+        )
+        // Press Enter to submit
+        let _ = try await ShellCommand.run(
+            tmuxPath,
+            arguments: ["send-keys", "-t", sessionName, "Enter"]
+        )
+    }
+
     public func findSessionForWorktree(
         sessions: [TmuxSession],
         worktreePath: String,

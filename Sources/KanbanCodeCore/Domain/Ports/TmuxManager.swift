@@ -18,6 +18,9 @@ public protocol TmuxManagerPort: Sendable {
         branch: String?
     ) -> TmuxSession?
 
+    /// Send literal text + Enter to a tmux session (for submitting prompts to Claude).
+    func sendPrompt(to sessionName: String, text: String) async throws
+
     /// Check if tmux is available on this system.
     func isAvailable() async -> Bool
 }

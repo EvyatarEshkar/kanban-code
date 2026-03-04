@@ -152,6 +152,12 @@ public enum Action: Sendable {
     case markPRMerged(cardId: String, prNumber: Int)
     case mergeCards(sourceId: String, targetId: String)
 
+    // Queued prompts
+    case addQueuedPrompt(cardId: String, prompt: QueuedPrompt)
+    case updateQueuedPrompt(cardId: String, promptId: String, body: String, sendAutomatically: Bool)
+    case removeQueuedPrompt(cardId: String, promptId: String)
+    case sendQueuedPrompt(cardId: String, promptId: String)
+
     // Async completions
     case launchCompleted(cardId: String, tmuxName: String, sessionLink: SessionLink?, worktreeLink: WorktreeLink?, isRemote: Bool)
     case launchTmuxReady(cardId: String)
@@ -229,6 +235,7 @@ public enum Effect: Sendable {
     case refreshDiscovery
     case updateSessionIndex(sessionId: String, name: String)
     case moveSessionFile(cardId: String, sessionId: String, oldPath: String, newProjectPath: String)
+    case sendPromptToTmux(sessionName: String, promptBody: String)
 }
 
 // MARK: - Reducer
@@ -499,6 +506,48 @@ public enum Reducer {
             link.updatedAt = .now
             state.links[cardId] = link
             return [.upsertLink(link)]
+
+        case .addQueuedPrompt(let cardId, let prompt):
+            guard var link = state.links[cardId] else { return [] }
+            var prompts = link.queuedPrompts ?? []
+            prompts.append(prompt)
+            link.queuedPrompts = prompts
+            link.updatedAt = .now
+            state.links[cardId] = link
+            return [.upsertLink(link)]
+
+        case .updateQueuedPrompt(let cardId, let promptId, let body, let sendAutomatically):
+            guard var link = state.links[cardId] else { return [] }
+            guard var prompts = link.queuedPrompts,
+                  let idx = prompts.firstIndex(where: { $0.id == promptId }) else { return [] }
+            prompts[idx].body = body
+            prompts[idx].sendAutomatically = sendAutomatically
+            link.queuedPrompts = prompts
+            link.updatedAt = .now
+            state.links[cardId] = link
+            return [.upsertLink(link)]
+
+        case .removeQueuedPrompt(let cardId, let promptId):
+            guard var link = state.links[cardId] else { return [] }
+            link.queuedPrompts?.removeAll { $0.id == promptId }
+            if link.queuedPrompts?.isEmpty == true { link.queuedPrompts = nil }
+            link.updatedAt = .now
+            state.links[cardId] = link
+            return [.upsertLink(link)]
+
+        case .sendQueuedPrompt(let cardId, let promptId):
+            guard var link = state.links[cardId] else { return [] }
+            guard let prompts = link.queuedPrompts,
+                  let prompt = prompts.first(where: { $0.id == promptId }),
+                  let sessionName = link.tmuxLink?.sessionName else { return [] }
+            link.queuedPrompts?.removeAll { $0.id == promptId }
+            if link.queuedPrompts?.isEmpty == true { link.queuedPrompts = nil }
+            link.updatedAt = .now
+            state.links[cardId] = link
+            return [
+                .upsertLink(link),
+                .sendPromptToTmux(sessionName: sessionName, promptBody: prompt.body)
+            ]
 
         case .moveCardToProject(let cardId, let projectPath):
             guard var link = state.links[cardId] else { return [] }

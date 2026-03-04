@@ -1,5 +1,10 @@
 import Foundation
 
+extension Notification.Name {
+    /// Posted when hook events are processed that should trigger a UI refresh.
+    public static let kanbanCodeHookEvent = Notification.Name("kanbanCodeHookEvent")
+}
+
 /// Coordinates all background processes: session discovery, tmux polling,
 /// hook event processing, activity detection, PR tracking, and link management.
 @Observable
@@ -17,6 +22,7 @@ public final class BackgroundOrchestrator: @unchecked Sendable {
 
     private var backgroundTask: Task<Void, Never>?
     private var didInitialLoad = false
+    private var dispatch: (@MainActor @Sendable (Action) -> Void)?
 
     public init(
         discovery: SessionDiscovery,
@@ -55,6 +61,11 @@ public final class BackgroundOrchestrator: @unchecked Sendable {
     /// Update the notifier (e.g. when settings change).
     public func updateNotifier(_ newNotifier: NotifierPort?) {
         self.notifier = newNotifier
+    }
+
+    /// Set the dispatch callback for sending actions to the BoardStore.
+    public func setDispatch(_ dispatch: @MainActor @Sendable @escaping (Action) -> Void) {
+        self.dispatch = dispatch
     }
 
     /// Force re-scan a card's conversation for pushed branches and re-fetch PRs.
@@ -198,6 +209,18 @@ public final class BackgroundOrchestrator: @unchecked Sendable {
                         }
                         // Send directly — no dedup for Stop events (matches claude-pushover)
                         await self.doNotify(sessionId: sessionId)
+
+                        // Auto-send queued prompt: wait 1 more second (2s total from Stop),
+                        // re-check that user hasn't prompted, then send first auto prompt.
+                        try? await Task.sleep(for: .seconds(1))
+                        let promptedAgain = await notificationDedup.hasPromptedWithin(
+                            sessionId: sessionId, after: stopTime
+                        )
+                        if promptedAgain {
+                            KanbanCodeLog.info("notify", "Auto-send skipped: user prompted after stop")
+                            return
+                        }
+                        await self.autoSendQueuedPrompt(sessionId: sessionId)
                     }
 
                 case "Notification":
@@ -270,6 +293,36 @@ public final class BackgroundOrchestrator: @unchecked Sendable {
             imageData: imageData,
             cardId: link?.id
         )
+    }
+
+    /// Auto-send the first queued prompt with sendAutomatically=true for a session.
+    private func autoSendQueuedPrompt(sessionId: String) async {
+        do {
+            guard let link = try await coordinationStore.linkForSession(sessionId) else {
+                return
+            }
+            guard let prompts = link.queuedPrompts,
+                  let prompt = prompts.first(where: { $0.sendAutomatically }) else {
+                return
+            }
+            guard link.tmuxLink?.sessionName != nil else {
+                KanbanCodeLog.info("notify", "Auto-send skipped: no tmux session for \(sessionId.prefix(8))")
+                return
+            }
+
+            KanbanCodeLog.info("notify", "Auto-sending queued prompt to \(sessionId.prefix(8)): \(prompt.body.prefix(40))...")
+
+            // Dispatch through BoardStore — this removes from in-memory state,
+            // persists to disk, and sends to tmux via effects, all in sync.
+            if let dispatch {
+                await dispatch(.sendQueuedPrompt(cardId: link.id, promptId: prompt.id))
+            }
+
+            // Record that we "prompted" so the next stop can trigger the next queued prompt
+            await notificationDedup.recordPrompt(sessionId: sessionId, at: .now)
+        } catch {
+            KanbanCodeLog.warn("notify", "autoSendQueuedPrompt failed: \(error)")
+        }
     }
 
     /// Slow background tick: poll activity states for sessions without hook events.
