@@ -250,9 +250,17 @@ final class TerminalCache {
             // If in copy-mode, exit it on any non-modifier keypress.
             // Uses -X cancel (copy-mode command) — no-op if already exited, never leaks.
             if self.copyModeSessions.contains(session) {
+                // Ignore keys with Cmd/Opt/Ctrl held — let the system handle them
+                // (e.g. Cmd+C for copy, Cmd+V for paste).
+                let modifiers = event.modifierFlags.intersection([.command, .option, .control])
+                guard modifiers.isEmpty else { return event }
+
                 self.copyModeSessions.remove(session)
                 self.copyModeExitTime[session] = .now
-                let chars = event.characters ?? ""
+
+                // Esc just dismisses scroll mode — don't forward it to the shell.
+                let isEscape = event.keyCode == 53
+                let chars = isEscape ? "" : (event.characters ?? "")
                 Task.detached {
                     _ = try? await ShellCommand.run(tmux, arguments: ["send-keys", "-t", session, "-X", "cancel"])
                     if !chars.isEmpty {
