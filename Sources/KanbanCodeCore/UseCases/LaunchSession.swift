@@ -71,10 +71,10 @@ public final class LaunchSession: SessionLauncher, @unchecked Sendable {
         skipPermissions: Bool = false,
         preamble: String? = nil
     ) async throws -> String {
-        // Check if there's already a tmux session for this
+        // Kill stale tmux session if one exists — we always want a fresh resume
         let existing = try await tmux.listSessions()
         if let match = existing.first(where: { $0.name.contains(String(sessionId.prefix(8))) }) {
-            return match.name
+            try? await tmux.killSession(name: match.name)
         }
 
         // Create new tmux session with resume command
