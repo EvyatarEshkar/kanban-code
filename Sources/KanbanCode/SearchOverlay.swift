@@ -226,10 +226,80 @@ struct SearchOverlay: View {
     private func filterCards(query: String) -> [KanbanCodeCard] {
         let terms = queryTerms
         guard !terms.isEmpty else { return [] }
-        return cards.filter { card in
-            let text = "\(card.displayTitle) \(card.projectName ?? "") \(card.link.worktreeLink?.branch ?? "") \(card.link.projectPath ?? "") \(card.session?.firstPrompt ?? "") \(card.link.promptBody ?? "") \(card.link.sessionLink?.sessionId ?? "") \(card.link.id)".lowercased()
-            return terms.allSatisfy { text.contains($0) }
+        let activeColumns: Set<KanbanCodeColumn> = [.inProgress, .waiting, .inReview, .done]
+
+        return cards
+            .compactMap { card -> (KanbanCodeCard, Double)? in
+                let title = card.displayTitle.lowercased()
+                let project = (card.projectName ?? "").lowercased()
+                let branch = (card.link.worktreeLink?.branch ?? "").lowercased()
+                let other = "\(card.link.projectPath ?? "") \(card.session?.firstPrompt ?? "") \(card.link.promptBody ?? "") \(card.link.sessionLink?.sessionId ?? "") \(card.link.id)".lowercased()
+
+                let titleWords = title.split { !$0.isLetter && !$0.isNumber }.map(String.init)
+                let projectWords = project.split { !$0.isLetter && !$0.isNumber }.map(String.init)
+
+                var score = 0.0
+                for term in terms {
+                    let s = Self.termScore(term, titleWords: titleWords, title: title, projectWords: projectWords, project: project, branch: branch, other: other)
+                    if s > 0 {
+                        score += s
+                    } else if term.count >= 2, Self.fuzzyInitials(term, words: titleWords) {
+                        score += 10 // "kp" → Kanban Projects
+                    } else {
+                        return nil
+                    }
+                }
+
+                if activeColumns.contains(card.column) { score += 20 }
+
+                // Recency bonus: up to +5 for very recent, decaying over 7 days
+                let lastActive = card.link.lastActivity ?? card.link.updatedAt
+                let age = Date.now.timeIntervalSince(lastActive)
+                let maxAge: TimeInterval = 7 * 24 * 3600
+                if age < maxAge {
+                    score += 5.0 * (1.0 - age / maxAge)
+                }
+
+                return (card, score)
+            }
+            .sorted { $0.1 > $1.1 }
+            .map(\.0)
+    }
+
+    /// Score a single search term against card fields.
+    /// Word-start matches score much higher than mid-word matches.
+    private static func termScore(_ term: String, titleWords: [String], title: String, projectWords: [String], project: String, branch: String, other: String) -> Double {
+        // Title: word-start match (best)
+        for word in titleWords {
+            if word == term { return 15 }       // exact word
+            if word.hasPrefix(term) { return 12 } // word prefix
         }
+        if title.contains(term) { return 6 }   // mid-word substring
+
+        // Project: word-start match
+        for word in projectWords {
+            if word == term { return 8 }
+            if word.hasPrefix(term) { return 7 }
+        }
+        if project.contains(term) { return 4 }
+
+        // Branch / other
+        if branch.contains(term) { return 3 }
+        if other.contains(term) { return 1 }
+        return 0
+    }
+
+    /// Check if each character of `term` matches the first letter of consecutive words.
+    /// e.g. "kp" matches ["kanban", "projects"], "kl3" matches ["kanban", "loop", "3"]
+    private static func fuzzyInitials(_ term: String, words: [String]) -> Bool {
+        var i = term.startIndex
+        for word in words {
+            guard i < term.endIndex else { break }
+            if let first = word.first, first == term[i] {
+                i = term.index(after: i)
+            }
+        }
+        return i == term.endIndex
     }
 
     @ViewBuilder
@@ -443,15 +513,37 @@ struct HighlightedText: View {
     private var attributedString: AttributedString {
         var attr = AttributedString(text)
         let lower = text.lowercased()
+        let words = lower.split { !$0.isLetter && !$0.isNumber }
+
         for term in terms {
+            // Try substring matching first
+            var foundSubstring = false
             var searchStart = lower.startIndex
             while let range = lower.range(of: term, range: searchStart..<lower.endIndex) {
+                foundSubstring = true
                 let attrStart = AttributedString.Index(range.lowerBound, within: attr)
                 let attrEnd = AttributedString.Index(range.upperBound, within: attr)
                 if let start = attrStart, let end = attrEnd {
                     attr[start..<end].backgroundColor = .yellow.opacity(0.3)
                 }
                 searchStart = range.upperBound
+            }
+
+            // Fall back to fuzzy initials highlighting
+            if !foundSubstring && term.count >= 2 {
+                var termIdx = term.startIndex
+                for word in words {
+                    guard termIdx < term.endIndex else { break }
+                    if let first = word.first, first == term[termIdx] {
+                        let charIdx = word.startIndex
+                        let nextIdx = lower.index(after: charIdx)
+                        if let attrStart = AttributedString.Index(charIdx, within: attr),
+                           let attrEnd = AttributedString.Index(nextIdx, within: attr) {
+                            attr[attrStart..<attrEnd].backgroundColor = .yellow.opacity(0.3)
+                        }
+                        termIdx = term.index(after: termIdx)
+                    }
+                }
             }
         }
         return attr
