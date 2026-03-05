@@ -99,6 +99,7 @@ struct CardDetailView: View {
     @State private var isLoadingPRBody = false
     @State private var isMerging = false
     @State private var mergeError: String?
+    @State private var showMergeBlockedPopover = false
 
     // Queued prompts
     @State private var showQueuedPromptDialog = false
@@ -1180,75 +1181,139 @@ struct CardDetailView: View {
         return ms == "CLEAN" || ms == "UNSTABLE" || ms == "HAS_HOOKS"
     }
 
-    private var mergeStatusError: String? {
+    /// Human-readable reason the PR cannot be merged, or nil if it can.
+    private var mergeBlockedReason: String? {
         guard let pr = card.link.mergeablePR else { return nil }
-        if pr.mergeStateStatus == nil { return "Merge status unavailable — GitHub API may be slow or rate-limited" }
-        let ms = pr.mergeStateStatus!.uppercased()
-        if ms == "CLEAN" || ms == "UNSTABLE" || ms == "HAS_HOOKS" { return nil }
-        return "Merge blocked: \(pr.mergeStateStatus!.lowercased().replacingOccurrences(of: "_", with: " "))"
+        guard let ms = pr.mergeStateStatus?.uppercased() else { return nil } // still loading
+        switch ms {
+        case "CLEAN", "UNSTABLE", "HAS_HOOKS": return nil
+        case "BLOCKED": return "Blocked by branch protection rules"
+        case "BEHIND": return "Branch is behind the base branch and needs to be updated"
+        case "DIRTY": return "Merge conflicts must be resolved first"
+        case "DRAFT": return "Pull request is still a draft"
+        case "UNKNOWN": return "GitHub is still calculating merge status"
+        default: return "Merge state: \(ms.lowercased())"
+        }
     }
+
+    /// True when mergeStateStatus hasn't been fetched yet.
+    private var isMergeStatusLoading: Bool {
+        guard let pr = card.link.mergeablePR else { return false }
+        return pr.mergeStateStatus == nil
+    }
+
 
     @ViewBuilder
     private func mergeButton(pr: PRLink) -> some View {
         let canMerge = isMergeable
-        let errorMsg = mergeStatusError
-        Button {
-            guard canMerge, !isMerging, let repoRoot = card.link.projectPath else { return }
-            isMerging = true
-            mergeError = nil
-            Task {
-                let gh = GhCliAdapter()
-                let settings = try await SettingsStore().read()
-                let result = try await gh.mergePR(repoRoot: repoRoot, prNumber: pr.number, commandTemplate: settings.github.mergeCommand)
-                isMerging = false
-                switch result {
-                case .success(let warning):
-                    copyToast = "PR #\(pr.number) merged"
-                    onPRMerged(pr.number)
-                    if let warning, !warning.isEmpty {
-                        KanbanCodeLog.info("merge", "PR #\(pr.number) merged with warning: \(warning)")
+        let loading = isMergeStatusLoading
+        let blocked = mergeBlockedReason
+        if canMerge {
+            // Mergeable — green button
+            Button {
+                guard !isMerging, let repoRoot = card.link.projectPath else { return }
+                isMerging = true
+                mergeError = nil
+                Task {
+                    let gh = GhCliAdapter()
+                    let settings = try await SettingsStore().read()
+                    let result = try await gh.mergePR(repoRoot: repoRoot, prNumber: pr.number, commandTemplate: settings.github.mergeCommand)
+                    isMerging = false
+                    switch result {
+                    case .success(let warning):
+                        copyToast = "PR #\(pr.number) merged"
+                        onPRMerged(pr.number)
+                        if let warning, !warning.isEmpty {
+                            KanbanCodeLog.info("merge", "PR #\(pr.number) merged with warning: \(warning)")
+                        }
+                    case .failure(let msg):
+                        mergeError = msg
                     }
-                case .failure(let msg):
-                    mergeError = msg
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    if isMerging {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.triangle.merge")
+                    }
+                    Text("Merge")
+                }
+                .font(.app(size: 13))
+                .foregroundStyle(Color.green.opacity(0.8))
+                .padding(.horizontal, 12)
+                .frame(height: 36)
+                .background(Color.green.opacity(0.08), in: Capsule())
+                .background(.ultraThinMaterial, in: Capsule())
+            }
+            .buttonStyle(HoverFeedbackStyle())
+            .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
+            .disabled(isMerging)
+            .help("Merge pull request")
+            .popover(isPresented: .init(get: { mergeError != nil }, set: { if !$0 { mergeError = nil } })) {
+                if let err = mergeError {
+                    Text(err)
+                        .font(.app(.caption))
+                        .padding(8)
+                        .frame(maxWidth: 300)
                 }
             }
-        } label: {
-            HStack(spacing: 4) {
-                if isMerging {
-                    ProgressView()
-                        .controlSize(.small)
-                } else if errorMsg != nil {
-                    Image(systemName: "exclamationmark.triangle")
-                } else {
-                    Image(systemName: "arrow.triangle.merge")
+        } else if loading {
+            // Still loading merge status — gray with spinner, click opens PR on GitHub
+            Button {
+                if let url = pr.url.flatMap({ URL(string: $0 + "#partial-timeline") }) {
+                    NSWorkspace.shared.open(url)
                 }
-                Text("Merge")
+            } label: {
+                HStack(spacing: 4) {
+                    ProgressView().controlSize(.small)
+                    Text("Merge")
+                }
+                .font(.app(size: 13))
+                .foregroundStyle(Color.secondary.opacity(0.6))
+                .padding(.horizontal, 12)
+                .frame(height: 36)
+                .background(Color.secondary.opacity(0.06), in: Capsule())
+                .background(.ultraThinMaterial, in: Capsule())
             }
-            .font(.app(size: 13))
-            .foregroundStyle(canMerge ? Color.green.opacity(0.8) : errorMsg != nil ? Color.orange.opacity(0.7) : Color.secondary.opacity(0.6))
-            .padding(.horizontal, 12)
-            .frame(height: 36)
-            .background((canMerge ? Color.green : errorMsg != nil ? Color.orange : Color.secondary).opacity(0.08), in: Capsule())
-            .background(.ultraThinMaterial, in: Capsule())
-        }
-        .buttonStyle(HoverFeedbackStyle())
-        .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
-        .disabled(!canMerge || isMerging)
-        .overlay {
-            // Overlay captures hover on disabled button for tooltip
-            if let errorMsg {
+            .buttonStyle(HoverFeedbackStyle())
+            .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
+            .help("Loading merge status… Click to open PR on GitHub")
+        } else {
+            // Blocked — gray button with reason popover + clickable to open PR
+            VStack(spacing: 0) {
+                Button {
+                    if let url = pr.url.flatMap({ URL(string: $0 + "#partial-timeline") }) {
+                        NSWorkspace.shared.open(url)
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "nosign")
+                        Text("Merge")
+                    }
+                    .font(.app(size: 13))
+                    .foregroundStyle(Color.secondary.opacity(0.6))
+                    .padding(.horizontal, 12)
+                    .frame(height: 36)
+                    .background(Color.secondary.opacity(0.06), in: Capsule())
+                    .background(.ultraThinMaterial, in: Capsule())
+                }
+                .buttonStyle(HoverFeedbackStyle())
+                .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
+                .onHover { showMergeBlockedPopover = $0 }
+
+                // Invisible anchor below the button — popover opens downward, away from button
                 Color.clear
-                    .contentShape(Capsule())
-                    .help(errorMsg)
-            }
-        }
-        .help(canMerge ? "Merge pull request" : "")
-        .popover(isPresented: .init(get: { mergeError != nil }, set: { if !$0 { mergeError = nil } })) {
-            if let err = mergeError {
-                Text(err)
-                    .font(.app(.caption))
-                    .padding(8)
-                    .frame(maxWidth: 300)
+                    .frame(width: 0, height: 0)
+                    .popover(isPresented: $showMergeBlockedPopover, arrowEdge: .bottom) {
+                        if let reason = blocked {
+                            Text(reason)
+                                .font(.app(.caption))
+                                .padding(8)
+                                .frame(maxWidth: 300)
+                                .fixedSize()
+                        }
+                    }
             }
         }
     }

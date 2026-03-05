@@ -76,6 +76,7 @@ public final class GhCliAdapter: PRTrackerPort, @unchecked Sendable {
             \(alias): pullRequest(number: \(pr.number)) {
               body
               reviewDecision
+              mergeStateStatus
               reviewThreads(first: 100) { nodes { isResolved comments(first: 1) { nodes { url } } } }
               reviews(states: APPROVED) { totalCount }
               commits(last: 1) { nodes { commit { statusCheckRollup {
@@ -140,6 +141,11 @@ public final class GhCliAdapter: PRTrackerPort, @unchecked Sendable {
             // Review decision
             if let decision = prData["reviewDecision"] as? String {
                 pr.reviewDecision = decision
+            }
+
+            // Merge state status
+            if let mergeState = prData["mergeStateStatus"] as? String {
+                pr.mergeStateStatus = mergeState
             }
 
             // Approval count
@@ -273,16 +279,62 @@ public final class GhCliAdapter: PRTrackerPort, @unchecked Sendable {
             currentDirectory: repoRoot
         )
 
-        guard result.succeeded,
-              let data = result.stdout.data(using: .utf8),
-              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let dataObj = root["data"] as? [String: Any],
-              let repo = dataObj["repository"] as? [String: Any] else {
-            let combined = result.stderr + result.stdout
-            if combined.localizedCaseInsensitiveContains("rate limit") || combined.contains("RATE_LIMITED") {
-                KanbanCodeLog.warn("gh", "batchPRLookup hit rate limit")
-                throw GhCliError.rateLimited
+        // GraphQL may return partial data + errors, or fail entirely.
+        // Parse whatever data we can get; if total failure, retry individually.
+        let combined = result.stderr + result.stdout
+        if combined.localizedCaseInsensitiveContains("rate limit") || combined.contains("RATE_LIMITED") {
+            KanbanCodeLog.warn("gh", "batchPRLookup hit rate limit")
+            throw GhCliError.rateLimited
+        }
+
+        // Try to parse response (may have partial data even with errors)
+        let data = result.stdout.data(using: .utf8)
+        let root = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        let dataObj = root?["data"] as? [String: Any]
+        let repo = dataObj?["repository"] as? [String: Any]
+
+        // If batch failed entirely (e.g. one bad PR number breaks the query),
+        // retry each PR number individually so one bad apple doesn't block all.
+        if repo == nil && !numberAliases.isEmpty {
+            KanbanCodeLog.warn("gh", "batchPRLookup GraphQL failed, retrying PRs individually: \(result.stderr.prefix(200))")
+            var byBranch: [String: PullRequest] = [:]
+            var byNumber: [Int: PullRequest] = [:]
+
+            // Retry branches as a single batch (they rarely fail)
+            if !branchAliases.isEmpty {
+                let branchQuery = "query { repository(owner: \"\(ownerLogin)\", name: \"\(repoName)\") { \(branchAliases.map { alias, branch in "\(alias): pullRequests(headRefName: \"\(branch)\", first: 1, states: [OPEN, CLOSED, MERGED], orderBy: {field: CREATED_AT, direction: DESC}) { nodes { number title state url headRefName reviewDecision mergeStateStatus reviews(states: APPROVED) { totalCount } } }" }.joined(separator: "\n")) } }"
+                let brResult = try? await ShellCommand.run(ghPath, arguments: ["api", "graphql", "-f", "query=\(branchQuery)"], currentDirectory: repoRoot)
+                if let brData = brResult?.stdout.data(using: .utf8),
+                   let brRoot = try? JSONSerialization.jsonObject(with: brData) as? [String: Any],
+                   let brRepo = (brRoot["data"] as? [String: Any])?["repository"] as? [String: Any] {
+                    for (alias, branch) in branchAliases {
+                        guard let container = brRepo[alias] as? [String: Any],
+                              let nodes = container["nodes"] as? [[String: Any]],
+                              let item = nodes.first,
+                              let pr = parsePRFromGraphQL(item) else { continue }
+                        byBranch[branch] = pr
+                    }
+                }
             }
+
+            // Retry each PR number individually
+            for (_, number) in numberAliases {
+                let singleQuery = "query { repository(owner: \"\(ownerLogin)\", name: \"\(repoName)\") { pullRequest(number: \(number)) { number title state url headRefName reviewDecision mergeStateStatus reviews(states: APPROVED) { totalCount } } } }"
+                let sResult = try? await ShellCommand.run(ghPath, arguments: ["api", "graphql", "-f", "query=\(singleQuery)"], currentDirectory: repoRoot)
+                guard let sData = sResult?.stdout.data(using: .utf8),
+                      let sRoot = try? JSONSerialization.jsonObject(with: sData) as? [String: Any],
+                      let sRepo = (sRoot["data"] as? [String: Any])?["repository"] as? [String: Any],
+                      let item = sRepo["pullRequest"] as? [String: Any],
+                      let pr = parsePRFromGraphQL(item) else {
+                    KanbanCodeLog.info("gh", "batchPRLookup: PR #\(number) not found, skipping")
+                    continue
+                }
+                byNumber[number] = pr
+            }
+            return (byBranch, byNumber)
+        }
+
+        guard let repo else {
             KanbanCodeLog.warn("gh", "batchPRLookup GraphQL failed: \(result.stderr.prefix(200))")
             return ([:], [:])
         }

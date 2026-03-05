@@ -27,6 +27,9 @@ public struct AppState: Sendable {
     /// Whether a GitHub issue refresh is currently running.
     public var isRefreshingBacklog = false
 
+    /// Repo paths currently affected by GitHub API rate limiting.
+    public var rateLimitedRepos: Set<String> = []
+
     /// Session IDs that were deliberately deleted by the user.
     /// Prevents the reconciler from recreating cards for these sessions.
     public var deletedSessionIds: Set<String> = []
@@ -49,7 +52,8 @@ public struct AppState: Sendable {
         links.values.map { link in
             let session = link.sessionLink.flatMap { sessions[$0.sessionId] }
             let activity = link.sessionLink.flatMap { activityMap[$0.sessionId] }
-            return KanbanCodeCard(link: link, session: session, activityState: activity, isBusy: busyCards.contains(link.id))
+            let rateLimited = link.projectPath.map { rateLimitedRepos.contains($0) } ?? false
+            return KanbanCodeCard(link: link, session: session, activityState: activity, isBusy: busyCards.contains(link.id), isRateLimited: rateLimited)
         }
     }
 
@@ -179,6 +183,7 @@ public enum Action: Sendable {
     // Settings / misc
     case settingsLoaded(projects: [Project], excludedPaths: [String], remote: RemoteSettings?)
     case setError(String?)
+    case setRateLimitedRepos(Set<String>)
     case setSelectedProject(String?)
     case setLoading(Bool)
     case setIsRefreshingBacklog(Bool)
@@ -941,6 +946,10 @@ public enum Reducer {
             state.error = message
             return []
 
+        case .setRateLimitedRepos(let repos):
+            state.rateLimitedRepos = repos
+            return []
+
         case .setSelectedProject(let path):
             state.selectedProjectPath = path
             return []
@@ -1239,9 +1248,9 @@ public final class BoardStore: @unchecked Sendable {
                     return collected
                 }
 
-                var hitRateLimit = false
+                var rateLimitedRepos: Set<String> = []
                 for (repoRoot, byBranch, byNumber, rateLimited) in results {
-                    if rateLimited { hitRateLimit = true }
+                    if rateLimited { rateLimitedRepos.insert(repoRoot) }
                     for (branch, pr) in byBranch {
                         pullRequests[branch] = pr
                     }
@@ -1249,10 +1258,11 @@ public final class BoardStore: @unchecked Sendable {
                         prsByRepoAndNumber[repoRoot] = byNumber
                     }
                 }
-                if hitRateLimit {
+                if !rateLimitedRepos.isEmpty {
                     ghRateLimitedUntil = .now + .seconds(300)
                     dispatch(.setError("GitHub API rate limit exceeded — pausing PR lookups for 5 minutes"))
                 }
+                dispatch(.setRateLimitedRepos(rateLimitedRepos))
                 let totalByNumber = prsByRepoAndNumber.values.reduce(0) { $0 + $1.count }
                 KanbanCodeLog.info("reconcile", "PR lookup: \(t.duration(to: .now)) (\(pullRequests.count) by branch, \(totalByNumber) by number, \(allRepos.count) repos)")
                 lastGHLookup = .now

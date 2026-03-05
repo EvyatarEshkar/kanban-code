@@ -76,6 +76,60 @@ notify_fallback() {
     log "$msg"
 }
 
+# Worktree path fix functions — injected into SSH commands.
+# Git worktrees use absolute paths in .git files and gitdir files.
+# When Mutagen syncs between machines, those absolute paths break.
+# These functions convert them to relative paths that survive sync.
+#
+# Defined as a single string that gets prepended to SSH commands.
+# Runs on the REMOTE machine before/after each command.
+read -r -d '' WORKTREE_FIX_FN << 'WFIX' || true
+__relpath(){
+  local t="$1" b="$2"; t="${t%/}"; b="${b%/}"
+  local c="$b" r=""
+  while [ "${t#"$c"}" = "$t" ]; do c=$(dirname "$c"); r="../$r"; done
+  local f="${t#"$c"}"; f="${f#/}"; printf '%s\n' "${r}${f}"
+}
+__fix_gitlink(){
+  local f="$1" wp="$2" rp="$3"
+  [ -f "$f" ] || return 0
+  local c; c=$(cat "$f"); local ig=false p="$c"
+  case "$c" in gitdir:*) ig=true; p="${c#gitdir: }";; esac
+  p="${p//$wp/$rp}"
+  case "$p" in /*) ;; *) return 0;; esac
+  [ -e "$p" ] || return 0
+  local d; d=$(dirname "$f")
+  local rl; rl=$(__relpath "$p" "$d")
+  [ -n "$rl" ] || return 0
+  if $ig; then printf 'gitdir: %s\n' "$rl" > "$f"; else printf '%s\n' "$rl" > "$f"; fi
+}
+__fix_wt(){
+  local wp="$1" rp="$2" d; d=$(pwd); local gr=""
+  while [ "$d" != "/" ]; do
+    if [ -d "$d/.git" ]; then gr="$d"; break
+    elif [ -f "$d/.git" ]; then
+      __fix_gitlink "$d/.git" "$wp" "$rp"
+      local g; g=$(cat "$d/.git"); g="${g#gitdir: }"
+      case "$g" in /*) gr="${g%/.git/worktrees/*}";; *) gr=$(cd "$d/$g/../../.." 2>/dev/null && pwd);; esac
+      break
+    fi
+    d=$(dirname "$d")
+  done
+  [ -n "$gr" ] && [ -d "$gr/.git/worktrees" ] || return 0
+  for m in "$gr/.git/worktrees"/*/; do
+    [ -d "$m" ] || continue
+    __fix_gitlink "${m}gitdir" "$wp" "$rp"
+    local gc; [ -f "${m}gitdir" ] && gc=$(cat "${m}gitdir") || continue
+    [ -n "$gc" ] || continue
+    local wf
+    case "$gc" in /*) wf="$gc";;
+      *) wf=$(cd "$m" && cd "$(dirname "$gc")" 2>/dev/null && printf '%s/%s\n' "$(pwd)" "$(basename "$gc")") || continue;;
+    esac
+    [ -n "$wf" ] && __fix_gitlink "$wf" "$wp" "$rp"
+  done
+}
+WFIX
+
 # ---------- Modes ----------
 
 # Interactive mode: called when Claude spawns our "shell"
@@ -128,10 +182,17 @@ run_command() {
     local remote_cwd
     remote_cwd=$(replace_paths_to_remote "$(pwd)")
 
-    # Execute remotely with CWD marker
+    # Execute remotely with CWD marker.
+    # Inject worktree fix functions: convert absolute .git/gitdir paths to relative
+    # so worktrees created on one machine work after Mutagen syncs to the other.
     local output
     output=$(ssh "${SSH_OPTS[@]}" "$REMOTE_HOST" \
-        "cd '$remote_cwd' 2>/dev/null || cd '$REMOTE_PATH'; $remote_cmd; echo '${MARKER}'\$(pwd)" 2>&1) || true
+        "${WORKTREE_FIX_FN}
+cd '$remote_cwd' 2>/dev/null || cd '$REMOTE_PATH'
+__fix_wt '$LOCAL_PATH' '$REMOTE_PATH'
+$remote_cmd
+__fix_wt '$LOCAL_PATH' '$REMOTE_PATH'
+echo '${MARKER}'\$(pwd)" 2>&1) || true
 
     # Extract CWD from marker
     local new_cwd=""

@@ -9,13 +9,16 @@ public struct KanbanCodeCard: Identifiable, Sendable {
     /// True when an async operation is in progress on this card
     /// (terminal creating, worktree cleanup, PR discovery).
     public let isBusy: Bool
+    /// True when this card's repo is affected by GitHub API rate limiting.
+    public let isRateLimited: Bool
 
-    public init(link: Link, session: Session? = nil, activityState: ActivityState? = nil, isBusy: Bool = false) {
+    public init(link: Link, session: Session? = nil, activityState: ActivityState? = nil, isBusy: Bool = false, isRateLimited: Bool = false) {
         self.id = link.id
         self.link = link
         self.session = session
         self.activityState = activityState
         self.isBusy = isBusy
+        self.isRateLimited = isRateLimited
     }
 
     /// Whether Claude is confirmed actively working right now (not just waiting).
@@ -492,7 +495,7 @@ public final class BoardState: @unchecked Sendable {
 
                     for entry in branchesByRepo[repoRoot] ?? [] {
                         if let pr = byBranch[entry.branch] {
-                            mergedLinks[entry.index].prLinks.append(PRLink(number: pr.number, url: pr.url, status: pr.status, title: pr.title))
+                            mergedLinks[entry.index].prLinks.append(PRLink(number: pr.number, url: pr.url, status: pr.status, title: pr.title, mergeStateStatus: pr.mergeStateStatus))
                             KanbanCodeLog.info("refresh", "Discovered PR #\(pr.number) [\(pr.status)] for branch=\(entry.branch)")
                         }
                     }
@@ -501,6 +504,7 @@ public final class BoardState: @unchecked Sendable {
                             mergedLinks[entry.index].prLinks[entry.prIndex].status = pr.status
                             mergedLinks[entry.index].prLinks[entry.prIndex].title = pr.title
                             mergedLinks[entry.index].prLinks[entry.prIndex].url = pr.url
+                            mergedLinks[entry.index].prLinks[entry.prIndex].mergeStateStatus = pr.mergeStateStatus
                             if pr.approvalCount > 0 {
                                 mergedLinks[entry.index].prLinks[entry.prIndex].approvalCount = pr.approvalCount
                             }

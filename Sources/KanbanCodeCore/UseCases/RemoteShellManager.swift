@@ -82,6 +82,57 @@ public enum RemoteShellManager {
     STATE_FILE="/tmp/kanban-code-remote-state"
     NOTIFY_COOLDOWN=300  # 5 minutes
 
+    # Worktree path fix — git worktrees use absolute paths in .git files.
+    # When Mutagen syncs between machines, those paths break.
+    # These functions convert them to relative paths that survive sync.
+    # Injected into SSH commands before/after the user's command.
+    read -r -d '' WORKTREE_FIX_FN << 'WFIX' || true
+    __relpath(){
+      local t="$1" b="$2"; t="${t%/}"; b="${b%/}"
+      local c="$b" r=""
+      while [ "${t#"$c"}" = "$t" ]; do c=$(dirname "$c"); r="../$r"; done
+      local f="${t#"$c"}"; f="${f#/}"; printf '%s\\n' "${r}${f}"
+    }
+    __fix_gitlink(){
+      local f="$1" wp="$2" rp="$3"
+      [ -f "$f" ] || return 0
+      local c; c=$(cat "$f"); local ig=false p="$c"
+      case "$c" in gitdir:*) ig=true; p="${c#gitdir: }";; esac
+      p="${p//$wp/$rp}"
+      case "$p" in /*) ;; *) return 0;; esac
+      [ -e "$p" ] || return 0
+      local d; d=$(dirname "$f")
+      local rl; rl=$(__relpath "$p" "$d")
+      [ -n "$rl" ] || return 0
+      if $ig; then printf 'gitdir: %s\\n' "$rl" > "$f"; else printf '%s\\n' "$rl" > "$f"; fi
+    }
+    __fix_wt(){
+      local wp="$1" rp="$2" d; d=$(pwd); local gr=""
+      while [ "$d" != "/" ]; do
+        if [ -d "$d/.git" ]; then gr="$d"; break
+        elif [ -f "$d/.git" ]; then
+          __fix_gitlink "$d/.git" "$wp" "$rp"
+          local g; g=$(cat "$d/.git"); g="${g#gitdir: }"
+          case "$g" in /*) gr="${g%/.git/worktrees/*}";; *) gr=$(cd "$d/$g/../../.." 2>/dev/null && pwd);; esac
+          break
+        fi
+        d=$(dirname "$d")
+      done
+      [ -n "$gr" ] && [ -d "$gr/.git/worktrees" ] || return 0
+      for m in "$gr/.git/worktrees"/*/; do
+        [ -d "$m" ] || continue
+        __fix_gitlink "${m}gitdir" "$wp" "$rp"
+        local gc; [ -f "${m}gitdir" ] && gc=$(cat "${m}gitdir") || continue
+        [ -n "$gc" ] || continue
+        local wf
+        case "$gc" in /*) wf="$gc";;
+          *) wf=$(cd "$m" && cd "$(dirname "$gc")" 2>/dev/null && printf '%s/%s\\n' "$(pwd)" "$(basename "$gc")") || continue;;
+        esac
+        [ -n "$wf" ] && __fix_gitlink "$wf" "$wp" "$rp"
+      done
+    }
+    WFIX
+
     # Map local path to remote path
     local_to_remote() {
         echo "${1/#$LOCAL_MOUNT/$REMOTE_DIR}"
@@ -175,8 +226,11 @@ public enum RemoteShellManager {
 
             # Build remote command
             # Source .profile and .bashrc (with non-interactive guard disabled)
+            # Inject worktree fix: convert absolute .git/gitdir paths to relative
+            # so worktrees synced between machines work correctly.
             MARKER="__KANBAN_CODE_REMOTE_PWD__"
-            remote_cmd="source ~/.profile 2>/dev/null; source <(sed 's/return;;/;;/' ~/.bashrc) 2>/dev/null; cd '$REMOTE_CWD' 2>/dev/null || cd '$REMOTE_DIR'; /bin/bash -c $(printf '%q' "$cmd"); echo $MARKER; pwd -P"
+            remote_cmd="${WORKTREE_FIX_FN}
+            source ~/.profile 2>/dev/null; source <(sed 's/return;;/;;/' ~/.bashrc) 2>/dev/null; cd '$REMOTE_CWD' 2>/dev/null || cd '$REMOTE_DIR'; __fix_wt '$LOCAL_MOUNT' '$REMOTE_DIR'; /bin/bash -c $(printf '%q' "$cmd"); __fix_wt '$LOCAL_MOUNT' '$REMOTE_DIR'; echo $MARKER; pwd -P"
 
             # Run and capture output
             remote_output=$(/usr/bin/ssh $SSH_OPTS "$REMOTE_HOST" "$remote_cmd")

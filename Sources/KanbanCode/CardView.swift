@@ -82,6 +82,11 @@ struct CardView: View {
                     }
                 }
 
+                // Rate limit badge
+                if card.isRateLimited {
+                    RateLimitBadge()
+                }
+
                 // Issue indicator
                 if let issue = card.link.issueLink {
                     HStack(spacing: 2) {
@@ -279,6 +284,32 @@ struct CardLabelBadge: View {
         case .issue: .blue
         case .pr: .purple
         case .task: .gray
+        }
+    }
+}
+
+// MARK: - Rate Limit Badge
+
+struct RateLimitBadge: View {
+    @State private var isHovering = false
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.app(size: 8))
+            Text("Rate Limited")
+                .font(.app(size: 9, weight: .medium))
+        }
+        .padding(.horizontal, 5)
+        .padding(.vertical, 2)
+        .background(Capsule().fill(Color.orange.opacity(0.15)))
+        .foregroundStyle(.orange)
+        .onHover { isHovering = $0 }
+        .popover(isPresented: $isHovering, arrowEdge: .top) {
+            Text("GitHub API rate limit exceeded.\nPR status updates paused for 5 minutes.")
+                .font(.app(.caption))
+                .padding(8)
+                .fixedSize()
         }
     }
 }
