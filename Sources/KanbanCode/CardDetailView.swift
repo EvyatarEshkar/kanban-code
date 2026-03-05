@@ -178,11 +178,9 @@ struct CardDetailView: View {
                             prSummaryPill(primary: primary)
                         }
 
-                        // Merge button (based on GitHub mergeability)
-                        if let primary = card.link.prLink,
-                           let status = primary.status,
-                           status != .merged, status != .closed {
-                            mergeButton(pr: primary)
+                        // Merge button — only when exactly one open PR exists
+                        if let mergePR = card.link.mergeablePR {
+                            mergeButton(pr: mergePR)
                         }
 
                         if card.link.tmuxLink == nil {
@@ -1178,14 +1176,16 @@ struct CardDetailView: View {
     }
 
     private var isMergeable: Bool {
-        guard let ms = card.link.prLink?.mergeStateStatus?.uppercased() else { return false }
+        guard let ms = card.link.mergeablePR?.mergeStateStatus?.uppercased() else { return false }
         return ms == "CLEAN" || ms == "UNSTABLE" || ms == "HAS_HOOKS"
     }
 
-    private var isMergeLoading: Bool {
-        guard let pr = card.link.prLink, let status = pr.status,
-              status != .merged, status != .closed else { return false }
-        return pr.mergeStateStatus == nil
+    private var mergeStatusError: String? {
+        guard let pr = card.link.mergeablePR else { return nil }
+        if pr.mergeStateStatus == nil { return "Merge status unavailable — GitHub API may be slow or rate-limited" }
+        let ms = pr.mergeStateStatus!.uppercased()
+        if ms == "CLEAN" || ms == "UNSTABLE" || ms == "HAS_HOOKS" { return nil }
+        return "Merge blocked: \(pr.mergeStateStatus!.lowercased().replacingOccurrences(of: "_", with: " "))"
     }
 
     @ViewBuilder
@@ -1213,25 +1213,28 @@ struct CardDetailView: View {
             }
         } label: {
             HStack(spacing: 4) {
-                if isMerging || isMergeLoading {
+                if isMerging {
                     ProgressView()
                         .controlSize(.small)
+                } else if let error = mergeStatusError {
+                    Image(systemName: "exclamationmark.triangle")
+                    let _ = error // suppress unused warning, used in .help below
                 } else {
                     Image(systemName: "arrow.triangle.merge")
                 }
-                Text(canMerge || isMergeLoading ? "Merge" : "Merge Blocked")
+                Text(canMerge ? "Merge" : mergeStatusError != nil ? "Merge" : "Merge Blocked")
             }
             .font(.system(size: 13))
-            .foregroundStyle(canMerge ? Color.green.opacity(0.8) : Color.secondary.opacity(0.6))
+            .foregroundStyle(canMerge ? Color.green.opacity(0.8) : mergeStatusError != nil ? Color.orange.opacity(0.7) : Color.secondary.opacity(0.6))
             .padding(.horizontal, 12)
             .frame(height: 36)
-            .background((canMerge ? Color.green : Color.secondary).opacity(0.08), in: Capsule())
+            .background((canMerge ? Color.green : mergeStatusError != nil ? Color.orange : Color.secondary).opacity(0.08), in: Capsule())
             .background(.ultraThinMaterial, in: Capsule())
         }
         .buttonStyle(HoverFeedbackStyle())
         .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
         .disabled(!canMerge || isMerging)
-        .help(canMerge ? "Merge pull request" : "PR cannot be merged yet")
+        .help(canMerge ? "Merge pull request" : mergeStatusError ?? "PR cannot be merged yet")
         .popover(isPresented: .init(get: { mergeError != nil }, set: { if !$0 { mergeError = nil } })) {
             if let err = mergeError {
                 Text(err)

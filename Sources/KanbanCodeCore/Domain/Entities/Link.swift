@@ -186,6 +186,11 @@ public struct Link: Identifiable, Codable, Sendable {
 
     /// Primary PR (first in array, or nil). Backward-compat shorthand.
     public var prLink: PRLink? { prLinks.first }
+    /// The single open PR eligible for merge, or nil if 0 or 2+ open PRs exist.
+    public var mergeablePR: PRLink? {
+        let open = prLinks.filter { $0.status != .merged && $0.status != .closed }
+        return open.count == 1 ? open.first : nil
+    }
     /// Worst PR status across all PRs (highest urgency).
     public var worstPRStatus: PRStatus? { prLinks.compactMap(\.status).min() }
     /// True if ALL PRs are merged or closed.
