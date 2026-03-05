@@ -231,9 +231,18 @@ final class BatchedTerminalView: LocalProcessTerminalView {
 @MainActor
 final class TerminalCache {
     static let shared = TerminalCache()
+    static let defaultFontSize: CGFloat = 12
+    static let fontSizeKey = "terminalFontSize"
+
     private var terminals: [String: BatchedTerminalView] = [:]
     private var shiftEnterMonitor: Any?
     private var scrollWheelMonitor: Any?
+    private var fontSizeObserver: Any?
+
+    private var currentFontSize: CGFloat = {
+        let stored = UserDefaults.standard.double(forKey: TerminalCache.fontSizeKey)
+        return stored > 0 ? CGFloat(stored) : TerminalCache.defaultFontSize
+    }()
 
     /// Tracks tmux copy-mode state per session for scroll interception.
     fileprivate var copyModeSessions: Set<String> = []
@@ -371,6 +380,28 @@ final class TerminalCache {
 
             return nil // consume the event — don't let TerminalView handle it
         }
+
+        // Observe font size changes from Settings / Cmd+Plus/Minus
+        fontSizeObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.applyFontSizeIfChanged()
+            }
+        }
+    }
+
+    private func applyFontSizeIfChanged() {
+        let stored = UserDefaults.standard.double(forKey: Self.fontSizeKey)
+        let newSize = stored > 0 ? CGFloat(stored) : Self.defaultFontSize
+        guard newSize != currentFontSize else { return }
+        currentFontSize = newSize
+        let font = NSFont.monospacedSystemFont(ofSize: newSize, weight: .regular)
+        for terminal in terminals.values {
+            terminal.font = font
+        }
     }
 
     /// Tracks which terminals have had their process started.
@@ -416,8 +447,7 @@ final class TerminalCache {
             c(0xFF, 0xFF, 0xFF),  // bright white
         ])
 
-        // Slightly smaller font than the default
-        terminal.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        terminal.font = NSFont.monospacedSystemFont(ofSize: currentFontSize, weight: .regular)
 
         // Do NOT set autoresizingMask — we manage frame explicitly in layout()
         // to avoid intermediate sizes triggering tmux redraws during animations.

@@ -39,13 +39,13 @@ struct ColumnView: View {
         .overlay(alignment: .top) {
             HStack {
                 Text(column.displayName)
-                    .font(.headline)
+                    .font(.app(.headline))
                     .foregroundStyle(.primary)
 
                 Spacer()
 
                 Text("\(cards.count)")
-                    .font(.caption)
+                    .font(.app(.caption))
                     .fontWeight(.medium)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)

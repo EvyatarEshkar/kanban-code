@@ -53,6 +53,7 @@ struct ContentView: View {
     @State private var showQuitConfirmation = false
     @State private var quitOwnedSessions: [TmuxSession] = []
     @AppStorage("killTmuxOnQuit") private var killTmuxOnQuit = true
+    @AppStorage("uiTextSize") private var uiTextSize: Int = 1
     @State private var showAddFromPath = false
     @State private var isDroppingFolder = false
     @State private var addFromPathText = ""
@@ -320,10 +321,10 @@ struct ContentView: View {
                         .overlay {
                             VStack(spacing: 8) {
                                 Image(systemName: "folder.badge.plus")
-                                    .font(.system(size: 40))
+                                    .font(.app(size: 40))
                                     .foregroundStyle(Color.accentColor)
                                 Text("Drop to add project")
-                                    .font(.title3.weight(.medium))
+                                    .font(.app(.title3, weight: .medium))
                                     .foregroundStyle(.primary)
                             }
                         }
@@ -698,7 +699,7 @@ struct ContentView: View {
                             Image(systemName: "magnifyingglass")
                             Text("Search")
                             Text("⌘K")
-                                .font(.caption)
+                                .font(.app(.caption))
                                 .foregroundStyle(.secondary)
                                 .padding(.horizontal, 5)
                                 .padding(.vertical, 1)
@@ -768,6 +769,7 @@ struct ContentView: View {
                     .hidden()
             }
         } // NavigationStack
+        .id(uiTextSize) // Force full re-render when UI scale changes
     }
 
     /// Watch ~/.kanban-code/hook-events.jsonl for writes → post notification.
@@ -855,7 +857,7 @@ struct ContentView: View {
                     Spacer()
                     Text("\(store.state.cards.count)")
                         .foregroundStyle(.secondary)
-                        .font(.caption)
+                        .font(.app(.caption))
                     if store.state.selectedProjectPath == nil {
                         Image(systemName: "checkmark")
                     }
@@ -876,7 +878,7 @@ struct ContentView: View {
                             if count > 0 {
                                 Text("\(count)")
                                     .foregroundStyle(.secondary)
-                                    .font(.caption)
+                                    .font(.app(.caption))
                             }
                             if store.state.selectedProjectPath == project.path {
                                 Image(systemName: "checkmark")
@@ -923,7 +925,7 @@ struct ContentView: View {
             }
         } label: {
             Text(currentProjectName)
-                .font(.headline)
+                .font(.app(.headline))
         }
     }
 
@@ -964,12 +966,12 @@ struct ContentView: View {
         VStack(spacing: 0) {
             VStack(spacing: 8) {
                 Image(systemName: "terminal")
-                    .font(.largeTitle)
+                    .font(.app(.largeTitle))
                     .foregroundStyle(.secondary)
                 Text("Quit Kanban?")
-                    .font(.headline)
+                    .font(.app(.headline))
                 Text("You have \(quitOwnedSessions.count) managed tmux session\(quitOwnedSessions.count == 1 ? "" : "s") running.")
-                    .font(.subheadline)
+                    .font(.app(.subheadline))
                     .foregroundStyle(.secondary)
             }
             .padding(.top, 20)
@@ -1048,7 +1050,7 @@ struct ContentView: View {
                 Image(systemName: syncStatusIcon(currentSyncStatus))
                     .foregroundStyle(syncStatusColor(currentSyncStatus))
                 Text("Sync Status")
-                    .font(.headline)
+                    .font(.app(.headline))
             }
             .padding(.horizontal, 4)
         }
@@ -1064,13 +1066,13 @@ struct ContentView: View {
     private var syncStatusPopover: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("File sync for remote Claude Code sessions, configured in Settings > Remote.")
-                .font(.callout)
+                .font(.app(.callout))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             ScrollView {
                 Text(rawSyncOutput)
-                    .font(.system(.caption, design: .monospaced))
+                    .font(.app(.caption, design: .monospaced))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(8)
@@ -1080,7 +1082,7 @@ struct ContentView: View {
 
             HStack(spacing: 4) {
                 Text("mutagen sync list -l")
-                    .font(.system(.caption2, design: .monospaced))
+                    .font(.app(.caption2, design: .monospaced))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 Spacer()
@@ -1089,7 +1091,7 @@ struct ContentView: View {
                     NSPasteboard.general.setString("mutagen sync list -l", forType: .string)
                 } label: {
                     Image(systemName: "doc.on.doc")
-                        .font(.caption)
+                        .font(.app(.caption))
                 }
                 .buttonStyle(.borderless)
                 .help("Copy command")
@@ -1393,7 +1395,7 @@ struct ContentView: View {
     private var addFromPathSheet: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Add Project")
-                .font(.title3)
+                .font(.app(.title3))
                 .fontWeight(.semibold)
 
             TextField("Project path (e.g. ~/Projects/my-repo)", text: $addFromPathText)

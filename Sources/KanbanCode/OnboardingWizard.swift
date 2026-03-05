@@ -16,6 +16,7 @@ struct OnboardingWizard: View {
     @State private var navigatingForward = true
     @State private var runningClaudeCount = 0
     @State private var killedClaudes = false
+    @State private var renderMarkdownImage = false
 
     private let totalSteps = 6
 
@@ -40,7 +41,7 @@ struct OnboardingWizard: View {
                 case 0: welcomeStep
                 case 1: claudeCodeStep
                 case 2: hooksStep
-                case 3: brewDependenciesStep
+                case 3: dependenciesStep
                 case 4: notificationsStep
                 case 5: completeStep
                 default: EmptyView()
@@ -110,15 +111,15 @@ struct OnboardingWizard: View {
         VStack(spacing: 16) {
             Spacer()
             Image(systemName: "rectangle.3.group")
-                .font(.system(size: 48))
+                .font(.app(size: 48))
                 .foregroundStyle(Color.accentColor)
 
             Text("Welcome to Kanban")
-                .font(.title2)
+                .font(.app(.title2))
                 .fontWeight(.semibold)
 
             Text("Let's set up everything you need to manage your coding agent sessions.")
-                .font(.body)
+                .font(.app(.body))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 360)
@@ -143,17 +144,17 @@ struct OnboardingWizard: View {
             if status?.claudeAvailable == true {
                 Label("Claude Code is installed and ready", systemImage: "checkmark.circle.fill")
                     .foregroundStyle(.green)
-                    .font(.callout)
+                    .font(.app(.callout))
             } else {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Install Claude Code:")
-                        .font(.caption)
+                        .font(.app(.caption))
                         .foregroundStyle(.secondary)
 
                     let command = "npm install -g @anthropic-ai/claude-code"
                     HStack {
                         Text(command)
-                            .font(.system(.caption, design: .monospaced))
+                            .font(.app(.caption, design: .monospaced))
                             .textSelection(.enabled)
                             .padding(8)
                             .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
@@ -169,7 +170,7 @@ struct OnboardingWizard: View {
                     }
 
                     Text("Kanban works without Claude Code installed — columns will just be empty until sessions are created.")
-                        .font(.caption)
+                        .font(.app(.caption))
                         .foregroundStyle(.tertiary)
                 }
 
@@ -196,7 +197,7 @@ struct OnboardingWizard: View {
             if status?.hooksInstalled == true {
                 Label("All hooks are installed and ready", systemImage: "checkmark.circle.fill")
                     .foregroundStyle(.green)
-                    .font(.callout)
+                    .font(.app(.callout))
 
                 // Check for pre-existing Claude sessions that won't have hooks
                 if runningClaudeCount > 0 && !killedClaudes {
@@ -205,10 +206,10 @@ struct OnboardingWizard: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Label("\(runningClaudeCount) Claude session\(runningClaudeCount == 1 ? "" : "s") running without hooks", systemImage: "exclamationmark.triangle")
                             .foregroundStyle(.orange)
-                            .font(.callout)
+                            .font(.app(.callout))
 
                         Text("These were started before hooks were installed and won't be tracked by Kanban. Kill them so they can be restarted with hooks.")
-                            .font(.caption)
+                            .font(.app(.caption))
                             .foregroundStyle(.secondary)
 
                         Button("Kill All Claude Sessions") {
@@ -220,7 +221,7 @@ struct OnboardingWizard: View {
                 } else if killedClaudes {
                     Label("Old sessions killed — restart them to get full tracking", systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green)
-                        .font(.callout)
+                        .font(.app(.callout))
                 }
             } else {
                 Button("Install Hooks") {
@@ -239,7 +240,7 @@ struct OnboardingWizard: View {
 
                 if let hookError {
                     Text(hookError)
-                        .font(.caption)
+                        .font(.app(.caption))
                         .foregroundStyle(.red)
                 }
             }
@@ -275,19 +276,17 @@ struct OnboardingWizard: View {
         runningClaudeCount = 0
     }
 
-    // MARK: - Step 3: Brew Dependencies
+    // MARK: - Step 3: Dependencies
 
-    private var brewDependenciesStep: some View {
+    private var dependenciesStep: some View {
         VStack(alignment: .leading, spacing: 16) {
             stepHeader(
                 icon: "shippingbox",
                 title: "Dependencies",
-                description: "Optional tools for rich notification images and integrations."
+                description: "Tools that Kanban Code needs for session management and GitHub integration."
             )
 
             Group {
-                statusCheckRow("pandoc", done: status?.pandocAvailable ?? false)
-                statusCheckRow("wkhtmltoimage", done: status?.wkhtmltoimageAvailable ?? false)
                 statusCheckRow("tmux", done: status?.tmuxAvailable ?? false)
                 statusCheckRow("GitHub CLI (gh)", done: status?.ghAvailable ?? false)
                 if status?.ghAvailable == true && !(status?.ghAuthenticated ?? false) {
@@ -295,29 +294,28 @@ struct OnboardingWizard: View {
                         Image(systemName: "exclamationmark.triangle")
                             .foregroundStyle(.orange)
                         Text("gh is installed but not logged in. Run")
-                            .font(.caption)
+                            .font(.app(.caption))
                             .foregroundStyle(.secondary)
                         Text("gh auth login")
-                            .font(.system(.caption, design: .monospaced))
+                            .font(.app(.caption, design: .monospaced))
                             .foregroundStyle(.primary)
                         Text("in a terminal.")
-                            .font(.caption)
+                            .font(.app(.caption))
                             .foregroundStyle(.secondary)
                     }
                     .padding(.leading, 24)
                 }
-                statusCheckRow("Mutagen", done: status?.mutagenAvailable ?? false)
             }
 
             if let command = brewInstallCommand {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Install missing dependencies:")
-                        .font(.caption)
+                        .font(.app(.caption))
                         .foregroundStyle(.secondary)
 
                     HStack {
                         Text(command)
-                            .font(.system(.caption, design: .monospaced))
+                            .font(.app(.caption, design: .monospaced))
                             .textSelection(.enabled)
                             .padding(8)
                             .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
@@ -334,18 +332,6 @@ struct OnboardingWizard: View {
                 }
             }
 
-            if !(status?.wkhtmltoimageAvailable ?? false) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("wkhtmltopdf is no longer in Homebrew. Install it manually:")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    Link("Download wkhtmltox-0.12.6-2.macos-cocoa.pkg",
-                         destination: URL(string: "https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6-2/wkhtmltox-0.12.6-2.macos-cocoa.pkg")!)
-                        .font(.system(.caption, design: .monospaced))
-                }
-            }
-
             recheckButton
 
             Spacer()
@@ -355,7 +341,6 @@ struct OnboardingWizard: View {
 
     private var brewInstallCommand: String? {
         var packages: [String] = []
-        if !(status?.pandocAvailable ?? false) { packages.append("pandoc") }
         if !(status?.tmuxAvailable ?? false) { packages.append("tmux") }
         if !(status?.ghAvailable ?? false) { packages.append("gh") }
         guard !packages.isEmpty else { return nil }
@@ -365,59 +350,97 @@ struct OnboardingWizard: View {
     // MARK: - Step 4: Notifications
 
     private var notificationsStep: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            stepHeader(
-                icon: "bell.badge",
-                title: "Notifications",
-                description: "Get notified when Claude stops and needs your input."
-            )
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                stepHeader(
+                    icon: "bell.badge",
+                    title: "Notifications",
+                    description: "Get notified when Claude stops and needs your input."
+                )
 
-            statusCheckRow("macOS Notifications", done: true)
+                statusCheckRow("macOS Notifications", done: true)
 
-            Text("Pushover (optional — for mobile push notifications)")
-                .font(.callout)
-                .fontWeight(.medium)
-                .padding(.top, 4)
+                Text("Pushover (optional — for mobile push notifications)")
+                    .font(.app(.callout))
+                    .fontWeight(.medium)
+                    .padding(.top, 4)
 
-            TextField("App Token", text: $pushoverToken)
-                .textFieldStyle(.roundedBorder)
-            TextField("User Key", text: $pushoverUserKey)
-                .textFieldStyle(.roundedBorder)
+                TextField("App Token", text: $pushoverToken)
+                    .textFieldStyle(.roundedBorder)
+                TextField("User Key", text: $pushoverUserKey)
+                    .textFieldStyle(.roundedBorder)
 
-            HStack {
-                Button {
-                    testPushover()
-                } label: {
-                    HStack(spacing: 4) {
-                        if testSending {
-                            ProgressView().controlSize(.mini)
-                        } else {
-                            Image(systemName: "play.circle")
+                HStack {
+                    Button {
+                        testPushover()
+                    } label: {
+                        HStack(spacing: 4) {
+                            if testSending {
+                                ProgressView().controlSize(.mini)
+                            } else {
+                                Image(systemName: "play.circle")
+                            }
+                            Text("Send Test")
                         }
-                        Text("Send Test")
+                    }
+                    .controlSize(.small)
+                    .disabled(pushoverToken.isEmpty || pushoverUserKey.isEmpty || testSending)
+
+                    if let testResult {
+                        Text(testResult)
+                            .font(.app(.caption))
+                            .foregroundStyle(testResult.contains("Sent") ? .green : .red)
                     }
                 }
-                .controlSize(.small)
-                .disabled(pushoverToken.isEmpty || pushoverUserKey.isEmpty || testSending)
 
-                if let testResult {
-                    Text(testResult)
-                        .font(.caption)
-                        .foregroundStyle(testResult.contains("Sent") ? .green : .red)
+                Text("Skip this step to use macOS notifications only.")
+                    .font(.app(.caption))
+                    .foregroundStyle(.tertiary)
+
+                Divider()
+                    .padding(.vertical, 4)
+
+                Toggle("Render full output as markdown image", isOn: $renderMarkdownImage)
+                    .disabled(pushoverToken.isEmpty || pushoverUserKey.isEmpty)
+
+                if pushoverToken.isEmpty || pushoverUserKey.isEmpty {
+                    Text("Enter Pushover credentials above to enable this option.")
+                        .font(.app(.caption))
+                        .foregroundStyle(.tertiary)
+                } else if renderMarkdownImage {
+                    Group {
+                        statusCheckRow("pandoc", done: status?.pandocAvailable ?? false)
+                        statusCheckRow("wkhtmltoimage", done: status?.wkhtmltoimageAvailable ?? false)
+                    }
+
+                    if !(status?.pandocAvailable ?? false) {
+                        Text("brew install pandoc")
+                            .font(.app(.caption, design: .monospaced))
+                            .foregroundStyle(.orange)
+                            .textSelection(.enabled)
+                    }
+
+                    if !(status?.wkhtmltoimageAvailable ?? false) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("wkhtmltopdf is no longer in Homebrew. Install it manually:")
+                                .font(.app(.caption))
+                                .foregroundStyle(.secondary)
+                            Link("Download wkhtmltox-0.12.6-2.macos-cocoa.pkg",
+                                 destination: URL(string: "https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6-2/wkhtmltox-0.12.6-2.macos-cocoa.pkg")!)
+                                .font(.app(.caption, design: .monospaced))
+                        }
+                    }
+
+                    recheckButton
                 }
             }
-
-            Text("Skip this step to use macOS notifications only.")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-
-            Spacer()
+            .padding(24)
         }
-        .padding(24)
         .task {
             if let settings = try? await settingsStore.read() {
                 pushoverToken = settings.notifications.pushoverToken ?? ""
                 pushoverUserKey = settings.notifications.pushoverUserKey ?? ""
+                renderMarkdownImage = settings.notifications.renderMarkdownImage
             }
         }
         .onDisappear {
@@ -425,6 +448,7 @@ struct OnboardingWizard: View {
                 var settings = (try? await settingsStore.read()) ?? Settings()
                 settings.notifications.pushoverToken = pushoverToken.isEmpty ? nil : pushoverToken
                 settings.notifications.pushoverUserKey = pushoverUserKey.isEmpty ? nil : pushoverUserKey
+                settings.notifications.renderMarkdownImage = renderMarkdownImage
                 try? await settingsStore.write(settings)
             }
         }
@@ -444,16 +468,13 @@ struct OnboardingWizard: View {
                 Group {
                     summaryRow("Claude Code", status: status?.claudeAvailable ?? false)
                     summaryRow("Claude Code Hooks", status: status?.hooksInstalled ?? false)
-                    summaryRow("pandoc", status: status?.pandocAvailable ?? false)
-                    summaryRow("wkhtmltoimage", status: status?.wkhtmltoimageAvailable ?? false)
                     summaryRow("Pushover", status: status?.pushoverConfigured ?? false)
                     summaryRow("tmux", status: status?.tmuxAvailable ?? false)
                     summaryRow("GitHub CLI", status: status?.ghAuthenticated ?? false)
-                    summaryRow("Mutagen", status: status?.mutagenAvailable ?? false)
                 }
 
                 Text("You can always reopen this wizard from Settings → General.")
-                    .font(.caption)
+                    .font(.app(.caption))
                     .foregroundStyle(.tertiary)
                     .padding(.top, 4)
             }
@@ -468,14 +489,14 @@ struct OnboardingWizard: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: icon)
-                    .font(.title3)
+                    .font(.app(.title3))
                     .foregroundStyle(Color.accentColor)
                 Text(title)
-                    .font(.title3)
+                    .font(.app(.title3))
                     .fontWeight(.semibold)
             }
             Text(description)
-                .font(.callout)
+                .font(.app(.callout))
                 .foregroundStyle(.secondary)
         }
     }
@@ -485,10 +506,10 @@ struct OnboardingWizard: View {
             Image(systemName: done ? "checkmark.circle.fill" : "circle")
                 .foregroundStyle(done ? .green : .secondary)
             Text(name)
-                .font(.callout)
+                .font(.app(.callout))
             Spacer()
             Text(done ? "Ready" : "Not set up")
-                .font(.caption)
+                .font(.app(.caption))
                 .foregroundStyle(done ? .green : .orange)
         }
     }
@@ -498,7 +519,7 @@ struct OnboardingWizard: View {
             Image(systemName: status ? "checkmark.circle.fill" : "exclamationmark.circle")
                 .foregroundStyle(status ? .green : .orange)
             Text(name)
-                .font(.callout)
+                .font(.app(.callout))
             Spacer()
         }
     }

@@ -26,12 +26,47 @@ struct KanbanCodeApp: App {
                     NotificationCenter.default.post(name: .kanbanCodeToggleSearch, object: nil)
                 }
                 .keyboardShortcut("k", modifiers: .command)
+
+                Divider()
+
+                Button("Zoom In") {
+                    Self.adjustZoom(by: 1)
+                }
+                .keyboardShortcut("+", modifiers: .command)
+
+                // Cmd+= (without shift) also zooms in — standard macOS behavior
+                Button("Zoom In") {
+                    Self.adjustZoom(by: 1)
+                }
+                .keyboardShortcut("=", modifiers: .command)
+
+                Button("Zoom Out") {
+                    Self.adjustZoom(by: -1)
+                }
+                .keyboardShortcut("-", modifiers: .command)
+
+                Button("Actual Size") {
+                    UserDefaults.standard.set(1, forKey: "uiTextSize")
+                    UserDefaults.standard.set(Double(TerminalCache.defaultFontSize), forKey: TerminalCache.fontSizeKey)
+                }
+                .keyboardShortcut("0", modifiers: .command)
             }
         }
 
         Settings {
             SettingsView()
         }
+    }
+
+    /// Adjust both UI text size and terminal font size together.
+    private static func adjustZoom(by delta: Int) {
+        let currentUI = UserDefaults.standard.object(forKey: "uiTextSize") != nil
+            ? UserDefaults.standard.integer(forKey: "uiTextSize") : 1
+        UserDefaults.standard.set(min(max(currentUI + delta, 0), 4), forKey: "uiTextSize")
+
+        let termSize = UserDefaults.standard.double(forKey: TerminalCache.fontSizeKey)
+        let currentTerm = termSize > 0 ? termSize : Double(TerminalCache.defaultFontSize)
+        UserDefaults.standard.set(min(max(currentTerm + Double(delta), 8), 24), forKey: TerminalCache.fontSizeKey)
     }
 }
 

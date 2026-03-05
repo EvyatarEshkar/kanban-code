@@ -80,7 +80,6 @@ struct SettingsView: View {
     @State private var hooksInstalled = false
     @State private var ghAvailable = false
     @State private var tmuxAvailable = false
-    @State private var mutagenAvailable = false
 
     var body: some View {
         TabView {
@@ -90,8 +89,7 @@ struct SettingsView: View {
             GeneralSettingsView(
                 hooksInstalled: $hooksInstalled,
                 ghAvailable: ghAvailable,
-                tmuxAvailable: tmuxAvailable,
-                mutagenAvailable: mutagenAvailable
+                tmuxAvailable: tmuxAvailable
             )
             .tabItem { Label("General", systemImage: "gear") }
 
@@ -114,7 +112,6 @@ struct SettingsView: View {
         hooksInstalled = HookManager.isInstalled()
         ghAvailable = await GhCliAdapter().isAvailable()
         tmuxAvailable = await TmuxAdapter().isAvailable()
-        mutagenAvailable = await MutagenAdapter().isAvailable()
     }
 }
 
@@ -124,9 +121,10 @@ struct GeneralSettingsView: View {
     @Binding var hooksInstalled: Bool
     let ghAvailable: Bool
     let tmuxAvailable: Bool
-    let mutagenAvailable: Bool
 
     @AppStorage("preferredEditorBundleId") private var editorBundleId: String = "dev.zed.Zed"
+    @AppStorage("uiTextSize") private var uiTextSize: Int = 1
+    @AppStorage("terminalFontSize") private var terminalFontSize: Double = Double(TerminalCache.defaultFontSize)
     @State private var installedEditors: [EditorDiscovery.Editor] = []
     @State private var showOnboarding = false
     @State private var mergeCommand: String = GitHubSettings.defaultMergeCommand
@@ -146,6 +144,39 @@ struct GeneralSettingsView: View {
                         }
                         .tag(editor.bundleId)
                     }
+                }
+            }
+
+            Section("Appearance") {
+                Picker("UI text size", selection: $uiTextSize) {
+                    Text("Small").tag(0)
+                    Text("Medium").tag(1)
+                    Text("Large").tag(2)
+                    Text("X-Large").tag(3)
+                    Text("XX-Large").tag(4)
+                }
+
+                HStack {
+                    Text("Terminal font size")
+                    Spacer()
+                    Text("\(Int(terminalFontSize)) pt")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                    Stepper("", value: $terminalFontSize, in: 8...24, step: 1)
+                        .labelsHidden()
+                }
+
+                HStack {
+                    Text("⌘+ / ⌘- to adjust both, or set independently here.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                    Spacer()
+                    Button("Reset to Defaults") {
+                        uiTextSize = 1
+                        terminalFontSize = Double(TerminalCache.defaultFontSize)
+                    }
+                    .controlSize(.small)
+                    .disabled(uiTextSize == 1 && terminalFontSize == Double(TerminalCache.defaultFontSize))
                 }
             }
 
@@ -174,7 +205,6 @@ struct GeneralSettingsView: View {
 
                 statusRow("tmux", available: tmuxAvailable)
                 statusRow("GitHub CLI (gh)", available: ghAvailable)
-                statusRow("Mutagen", available: mutagenAvailable)
             }
 
             Section("PR Merge") {
@@ -350,6 +380,7 @@ struct AmphetamineSettingsView: View {
 struct NotificationSettingsView: View {
     @State private var pushoverToken = ""
     @State private var pushoverUserKey = ""
+    @State private var renderMarkdownImage = false
     @State private var isSaving = false
     @State private var testSending = false
     @State private var testResult: String?
@@ -358,6 +389,10 @@ struct NotificationSettingsView: View {
     @State private var saveTask: Task<Void, Never>?
 
     private let settingsStore = SettingsStore()
+
+    private var pushoverConfigured: Bool {
+        !pushoverToken.isEmpty && !pushoverUserKey.isEmpty
+    }
 
     var body: some View {
         Form {
@@ -384,7 +419,7 @@ struct NotificationSettingsView: View {
                         }
                     }
                     .controlSize(.small)
-                    .disabled(pushoverToken.isEmpty || pushoverUserKey.isEmpty || testSending)
+                    .disabled(!pushoverConfigured || testSending)
 
                     if let testResult {
                         Text(testResult)
@@ -398,6 +433,33 @@ struct NotificationSettingsView: View {
                     .foregroundStyle(.tertiary)
             }
 
+            Section("Rich Notification Images") {
+                Toggle("Render full output as markdown image", isOn: $renderMarkdownImage)
+                    .disabled(!pushoverConfigured)
+                    .onChange(of: renderMarkdownImage) { scheduleSave() }
+
+                if !pushoverConfigured {
+                    Text("Configure Pushover above to enable this option.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                } else if renderMarkdownImage {
+                    statusRow("pandoc", available: pandocAvailable,
+                              hint: "brew install pandoc")
+                    statusRow("wkhtmltoimage", available: wkhtmltoimageAvailable,
+                              hint: "Download .pkg from github.com/wkhtmltopdf/packaging/releases")
+
+                    if !(pandocAvailable && wkhtmltoimageAvailable) {
+                        Text("Install the missing dependencies above to enable image rendering.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                } else {
+                    Text("When enabled, Claude's full markdown output is rendered as an image and attached to push notifications.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
             Section("macOS Fallback") {
                 HStack {
                     Label("Native Notifications", systemImage: "checkmark.circle.fill")
@@ -408,16 +470,6 @@ struct NotificationSettingsView: View {
                         .font(.caption)
                 }
                 Text("When Pushover is not configured, notifications are sent via macOS notification center.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-
-            Section("Image Rendering") {
-                statusRow("pandoc", available: pandocAvailable,
-                          hint: "brew install pandoc")
-                statusRow("wkhtmltoimage", available: wkhtmltoimageAvailable,
-                          hint: "Download .pkg from github.com/wkhtmltopdf/packaging/releases")
-                Text("Required for rendering rich notification images. Text notifications work without these.")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }
@@ -451,6 +503,7 @@ struct NotificationSettingsView: View {
             let settings = try await settingsStore.read()
             pushoverToken = settings.notifications.pushoverToken ?? ""
             pushoverUserKey = settings.notifications.pushoverUserKey ?? ""
+            renderMarkdownImage = settings.notifications.renderMarkdownImage
         } catch {}
         pandocAvailable = await ShellCommand.isAvailable("pandoc")
         wkhtmltoimageAvailable = await ShellCommand.isAvailable("wkhtmltoimage")
@@ -465,6 +518,7 @@ struct NotificationSettingsView: View {
                 var settings = try await settingsStore.read()
                 settings.notifications.pushoverToken = pushoverToken.isEmpty ? nil : pushoverToken
                 settings.notifications.pushoverUserKey = pushoverUserKey.isEmpty ? nil : pushoverUserKey
+                settings.notifications.renderMarkdownImage = renderMarkdownImage
                 try await settingsStore.write(settings)
             } catch {}
         }
@@ -499,6 +553,7 @@ struct RemoteSettingsView: View {
     @State private var localPath = ""
     @State private var syncIgnoresText = ""
     @State private var saveTask: Task<Void, Never>?
+    @State private var mutagenAvailable = false
 
     private let settingsStore = SettingsStore()
 
@@ -514,6 +569,23 @@ struct RemoteSettingsView: View {
                 TextField("Local Path", text: $localPath)
                     .textFieldStyle(.roundedBorder)
                     .onChange(of: localPath) { scheduleSave() }
+            }
+
+            if !remoteHost.isEmpty && !mutagenAvailable {
+                Section("Dependency") {
+                    HStack {
+                        Label("Mutagen", systemImage: "minus.circle")
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text("brew install mutagen")
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.orange)
+                            .textSelection(.enabled)
+                    }
+                    Text("Mutagen is required for syncing files between local and remote machines.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
             }
 
             Section("Sync Ignores") {
@@ -535,7 +607,10 @@ struct RemoteSettingsView: View {
         }
         .formStyle(.grouped)
         .padding()
-        .task { await loadSettings() }
+        .task {
+            await loadSettings()
+            mutagenAvailable = await ShellCommand.isAvailable("mutagen")
+        }
     }
 
     private func loadSettings() async {

@@ -22,10 +22,11 @@ struct SearchOverlay: View {
             // Search field
             HStack {
                 Image(systemName: "magnifyingglass")
+                    .font(.app(.title3))
                     .foregroundStyle(.secondary)
                 TextField("Search sessions...", text: $query)
                     .textFieldStyle(.plain)
-                    .font(.title3)
+                    .font(.app(.title3))
                     .focused($isSearchFocused)
                     .onSubmit {
                         Task { await deepSearch() }
@@ -176,7 +177,7 @@ struct SearchOverlay: View {
     private var recentSessionsView: some View {
         Group {
             Text("Recent Sessions")
-                .font(.caption)
+                .font(.app(.caption))
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 8)
                 .padding(.top, 4)
@@ -202,7 +203,7 @@ struct SearchOverlay: View {
                     Text("No matches")
                         .foregroundStyle(.secondary)
                     Text("Press Enter to deep search .jsonl files")
-                        .font(.caption)
+                        .font(.app(.caption))
                         .foregroundStyle(.tertiary)
                 }
                 .frame(maxWidth: .infinity)
@@ -342,23 +343,23 @@ struct SearchCardRow: View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 HighlightedText(text: card.displayTitle, terms: queryTerms)
-                    .font(.body)
+                    .font(.app(.body))
                     .lineLimit(1)
 
                 HStack(spacing: 8) {
                     if let project = card.projectName {
                         Text(project)
-                            .font(.caption)
+                            .font(.app(.caption))
                             .foregroundStyle(.secondary)
                     }
                     Text(card.relativeTime)
-                        .font(.caption)
+                        .font(.app(.caption))
                         .foregroundStyle(.tertiary)
                 }
             }
             Spacer()
             Text(card.column.displayName)
-                .font(.caption2)
+                .font(.app(.caption2))
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(Capsule().fill(Color.secondary.opacity(0.15)))
@@ -385,11 +386,11 @@ struct SearchResultRow: View {
                 HStack {
                     if let card = result.card {
                         HighlightedText(text: card.displayTitle, terms: queryTerms)
-                            .font(.body)
+                            .font(.app(.body))
                             .lineLimit(1)
                     } else {
                         Text((result.id as NSString).lastPathComponent)
-                            .font(.body)
+                            .font(.app(.body))
                             .lineLimit(1)
                     }
                     Spacer()
@@ -398,7 +399,7 @@ struct SearchResultRow: View {
                 // Snippets (up to 3)
                 ForEach(Array(result.snippets.enumerated()), id: \.offset) { _, snippet in
                     HighlightedText(text: snippet, terms: queryTerms)
-                        .font(.caption)
+                        .font(.app(.caption))
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }

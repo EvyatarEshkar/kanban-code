@@ -58,7 +58,7 @@ struct LaunchConfirmationDialog: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     Text(isResume ? "Resume Session" : "Launch Session")
-                        .font(.title3)
+                        .font(.app(.title3))
                         .fontWeight(.semibold)
 
                     // Project path (read-only)
@@ -66,7 +66,7 @@ struct LaunchConfirmationDialog: View {
                         Image(systemName: "folder")
                             .foregroundStyle(.secondary)
                         Text(projectPath)
-                            .font(.caption)
+                            .font(.app(.caption))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
@@ -78,7 +78,7 @@ struct LaunchConfirmationDialog: View {
                             Image(systemName: "arrow.triangle.branch")
                                 .foregroundStyle(.secondary)
                             Text(name)
-                                .font(.caption)
+                                .font(.app(.caption))
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -87,10 +87,10 @@ struct LaunchConfirmationDialog: View {
                     if isResume, let sid = sessionId {
                         HStack(spacing: 6) {
                             SessionIcon()
-                                .frame(width: 14, height: 14)
+                                .frame(width: CGFloat(14).scaled, height: CGFloat(14).scaled)
                                 .opacity(0.5)
                             Text(sid)
-                                .font(.caption.monospaced())
+                                .font(.app(.caption).monospaced())
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
@@ -101,7 +101,7 @@ struct LaunchConfirmationDialog: View {
                     if !isResume {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Prompt")
-                                .font(.caption)
+                                .font(.app(.caption))
                                 .foregroundStyle(.secondary)
 
                             PromptEditor(
@@ -120,37 +120,37 @@ struct LaunchConfirmationDialog: View {
                     VStack(alignment: .leading, spacing: 6) {
                         if !isResume && !hasExistingWorktree {
                             Toggle("Create worktree", isOn: isGitRepo ? $createWorktree : .constant(false))
-                                .font(.callout)
+                                .font(.app(.callout))
                                 .disabled(!isGitRepo)
                             if !isGitRepo {
                                 Label("Not a git repository", systemImage: "info.circle")
-                                    .font(.caption2)
+                                    .font(.app(.caption2))
                                     .foregroundStyle(.secondary)
                                     .padding(.leading, 20)
                             }
                         }
 
                         Toggle("Run remotely", isOn: hasRemoteConfig ? $runRemotely : .constant(false))
-                            .font(.callout)
+                            .font(.app(.callout))
                             .disabled(!hasRemoteConfig)
                         if !hasRemoteConfig {
                             Label("Configure remote execution in Settings > Remote", systemImage: "info.circle")
-                                .font(.caption2)
+                                .font(.app(.caption2))
                                 .foregroundStyle(.secondary)
                                 .padding(.leading, 20)
                         }
 
                         Toggle("Dangerously skip permissions", isOn: $dangerouslySkipPermissions)
-                            .font(.callout)
+                            .font(.app(.callout))
                     }
 
                     // Editable command
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Command")
-                            .font(.caption)
+                            .font(.app(.caption))
                             .foregroundStyle(.secondary)
                         TextEditor(text: $command)
-                            .font(.caption.monospaced())
+                            .font(.app(.caption).monospaced())
                             .frame(minHeight: 36, maxHeight: 80)
                             .fixedSize(horizontal: false, vertical: true)
                             .padding(4)

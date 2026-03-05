@@ -13,13 +13,13 @@ struct QueuedPromptsBar: View {
                 HStack(spacing: 6) {
                     if prompt.sendAutomatically {
                         Image(systemName: "bolt.fill")
-                            .font(.system(size: 9))
+                            .font(.app(size: 9))
                             .foregroundStyle(.orange)
                             .help("Will send automatically when Claude finishes")
                     }
 
                     Text(prompt.body)
-                        .font(.caption)
+                        .font(.app(.caption))
                         .lineLimit(2)
                         .truncationMode(.tail)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -34,7 +34,7 @@ struct QueuedPromptsBar: View {
                         onEdit(prompt)
                     } label: {
                         Image(systemName: "pencil")
-                            .font(.caption2)
+                            .font(.app(.caption2))
                     }
                     .buttonStyle(.borderless)
                     .help("Edit prompt")
@@ -43,7 +43,7 @@ struct QueuedPromptsBar: View {
                         onRemove(prompt.id)
                     } label: {
                         Image(systemName: "xmark")
-                            .font(.caption2)
+                            .font(.app(.caption2))
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.borderless)

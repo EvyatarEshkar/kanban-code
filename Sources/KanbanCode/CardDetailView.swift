@@ -158,14 +158,14 @@ struct CardDetailView: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .top) {
                     Text(card.displayTitle)
-                        .font(.headline)
+                        .font(.app(.headline))
                         .textCase(nil)
                         .lineLimit(2)
                         .layoutPriority(0)
 
                     if card.link.cardLabel == .session {
                         Text(card.relativeTime)
-                            .font(.caption)
+                            .font(.app(.caption))
                             .foregroundStyle(.tertiary)
                     }
 
@@ -188,7 +188,7 @@ struct CardDetailView: View {
                             let isStart = card.column == .backlog || !hasSession
                             Button(action: onResume) {
                                 Label(isStart ? "Start" : "Resume", systemImage: "play.fill")
-                                    .font(.system(size: 13))
+                                    .font(.app(size: 13))
                                     .foregroundStyle(isStart ? Color.green.opacity(0.8) : Color.blue.opacity(0.8))
                                     .padding(.horizontal, 12)
                                     .frame(height: 36)
@@ -205,8 +205,8 @@ struct CardDetailView: View {
                                 EditorDiscovery.open(path: path, bundleId: editorBundleId)
                             } label: {
                                 Image(systemName: "chevron.left.forwardslash.chevron.right")
-                                    .font(.system(size: 13))
-                                    .frame(width: 36, height: 36)
+                                    .font(.app(size: 13))
+                                    .frame(width: CGFloat(36).scaled, height: CGFloat(36).scaled)
                                     .contentShape(Circle())
                             }
                             .buttonStyle(.plain)
@@ -231,7 +231,7 @@ struct CardDetailView: View {
                         CardLabelBadge(label: card.link.cardLabel)
                         Spacer()
                         Text(card.relativeTime)
-                            .font(.caption)
+                            .font(.app(.caption))
                             .foregroundStyle(.tertiary)
                     }
                 }
@@ -239,10 +239,10 @@ struct CardDetailView: View {
                 if card.link.isRemote {
                     HStack(spacing: 2) {
                         Image(systemName: "cloud")
-                            .font(.caption)
+                            .font(.app(.caption))
                             .foregroundStyle(.teal)
                         Text("Remote")
-                            .font(.caption)
+                            .font(.app(.caption))
                             .foregroundStyle(.teal)
                     }
                 }
@@ -295,9 +295,9 @@ struct CardDetailView: View {
                     } label: {
                         HStack(spacing: 3) {
                             Image(systemName: "plus")
-                                .font(.caption2)
+                                .font(.app(.caption2))
                             Text("Add link")
-                                .font(.caption)
+                                .font(.app(.caption))
                         }
                         .foregroundStyle(.secondary)
                     }
@@ -464,7 +464,7 @@ struct CardDetailView: View {
         .overlay(alignment: .bottom) {
             if let copyToast {
                 Text(copyToast)
-                    .font(.caption.weight(.medium))
+                    .font(.app(.caption, weight: .medium))
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
@@ -589,7 +589,7 @@ struct CardDetailView: View {
 
                             Button(action: onCreateTerminal) {
                                 Image(systemName: "plus")
-                                    .font(.caption)
+                                    .font(.app(.caption))
                                     .padding(.horizontal, 6)
                                     .padding(.vertical, 4)
                             }
@@ -609,9 +609,9 @@ struct CardDetailView: View {
                         } label: {
                             HStack(spacing: 3) {
                                 Image(systemName: "doc.on.doc")
-                                    .font(.caption2)
+                                    .font(.app(.caption2))
                                 Text("Copy tmux attach")
-                                    .font(.caption)
+                                    .font(.app(.caption))
                             }
                         }
                         .buttonStyle(.bordered)
@@ -624,9 +624,9 @@ struct CardDetailView: View {
                         } label: {
                             HStack(spacing: 3) {
                                 Image(systemName: "text.badge.plus")
-                                    .font(.caption2)
+                                    .font(.app(.caption2))
                                 Text("Queue Prompt")
-                                    .font(.caption)
+                                    .font(.app(.caption))
                             }
                         }
                         .buttonStyle(.bordered)
@@ -697,10 +697,10 @@ struct CardDetailView: View {
             // No session at all — bare placeholder
             VStack(spacing: 12) {
                 Image(systemName: "terminal")
-                    .font(.system(size: 32))
+                    .font(.app(size: 32))
                     .foregroundStyle(.tertiary)
                 Text("No session yet")
-                    .font(.body)
+                    .font(.app(.body))
                     .foregroundStyle(.secondary)
                 HStack(spacing: 12) {
                     Button(action: onCreateTerminal) {
@@ -727,9 +727,9 @@ struct CardDetailView: View {
             } label: {
                 HStack(spacing: 4) {
                     SessionIcon()
-                        .frame(width: 12, height: 12)
+                        .frame(width: CGFloat(12).scaled, height: CGFloat(12).scaled)
                     Text("Claude")
-                        .font(.caption)
+                        .font(.app(.caption))
                         .lineLimit(1)
                 }
                 .padding(.horizontal, 8)
@@ -748,7 +748,7 @@ struct CardDetailView: View {
                     // Stay on Claude tab (will now show Resume)
                 } label: {
                     Image(systemName: "xmark")
-                        .font(.system(size: 8, weight: .bold))
+                        .font(.app(size: 8, weight: .bold))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 4)
                         .padding(.vertical, 4)
@@ -772,7 +772,7 @@ struct CardDetailView: View {
                 ProgressView()
                     .controlSize(.large)
                 Text("Starting session…")
-                    .font(.body)
+                    .font(.app(.body))
                     .foregroundStyle(.secondary)
                 Button(action: onCancelLaunch) {
                     Label("Stop", systemImage: "stop.fill")
@@ -784,10 +784,10 @@ struct CardDetailView: View {
         } else if card.link.sessionLink != nil {
             VStack(spacing: 12) {
                 SessionIcon()
-                    .frame(width: 32, height: 32)
+                    .frame(width: CGFloat(32).scaled, height: CGFloat(32).scaled)
                     .opacity(0.3)
                 Text("Claude session ended")
-                    .font(.body)
+                    .font(.app(.body))
                     .foregroundStyle(.secondary)
                 Button(action: onResume) {
                     Label("Resume Claude", systemImage: "play.fill")
@@ -798,10 +798,10 @@ struct CardDetailView: View {
         } else {
             VStack(spacing: 12) {
                 SessionIcon()
-                    .frame(width: 32, height: 32)
+                    .frame(width: CGFloat(32).scaled, height: CGFloat(32).scaled)
                     .opacity(0.3)
                 Text("No agent session")
-                    .font(.body)
+                    .font(.app(.body))
                     .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -829,9 +829,9 @@ struct CardDetailView: View {
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "terminal")
-                        .font(.caption2)
+                        .font(.app(.caption2))
                     Text(displayName)
-                        .font(.caption)
+                        .font(.app(.caption))
                         .lineLimit(1)
                 }
                 .padding(.horizontal, 8)
@@ -849,7 +849,7 @@ struct CardDetailView: View {
                 }
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 8, weight: .bold))
+                    .font(.app(size: 8, weight: .bold))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 4)
                     .padding(.vertical, 4)
@@ -888,10 +888,10 @@ struct CardDetailView: View {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(issue.title ?? card.displayTitle)
-                                .font(.headline)
+                                .font(.app(.headline))
                                 .textSelection(.enabled)
                             Text(verbatim: "#\(issue.number)")
-                                .font(.subheadline)
+                                .font(.app(.subheadline))
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
@@ -900,7 +900,7 @@ struct CardDetailView: View {
                                 NSWorkspace.shared.open(url)
                             } label: {
                                 Label("Open in Browser", systemImage: "arrow.up.right.square")
-                                    .font(.caption)
+                                    .font(.app(.caption))
                             }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
@@ -937,7 +937,7 @@ struct CardDetailView: View {
                     // Header: title + badge
                     VStack(alignment: .leading, spacing: 4) {
                         Text(pr.title ?? "Pull Request")
-                            .font(.headline)
+                            .font(.app(.headline))
                             .textSelection(.enabled)
                         HStack {
                             PRBadge(status: pr.status, prNumber: pr.number)
@@ -957,13 +957,13 @@ struct CardDetailView: View {
                     if let checks = pr.checkRuns, !checks.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("Checks")
-                                .font(.subheadline.bold())
+                                .font(.app(.subheadline, weight: .bold))
                                 .foregroundStyle(.secondary)
                             ForEach(checks, id: \.name) { check in
                                 HStack(spacing: 6) {
                                     checkRunIcon(check)
                                     Text(check.name)
-                                        .font(.caption)
+                                        .font(.app(.caption))
                                         .lineLimit(1)
                                 }
                             }
@@ -975,12 +975,12 @@ struct CardDetailView: View {
                         HStack(spacing: 16) {
                             if let approvals = pr.approvalCount, approvals > 0 {
                                 Label("\(approvals) approval\(approvals == 1 ? "" : "s")", systemImage: "checkmark.circle.fill")
-                                    .font(.caption)
+                                    .font(.app(.caption))
                                     .foregroundStyle(.green)
                             }
                             if let unresolved = pr.unresolvedThreads, unresolved > 0 {
                                 Label("\(unresolved) unresolved", systemImage: "bubble.left.fill")
-                                    .font(.caption)
+                                    .font(.app(.caption))
                                     .foregroundStyle(.orange)
                             }
                         }
@@ -996,7 +996,7 @@ struct CardDetailView: View {
                         ProgressView()
                             .controlSize(.small)
                         Text("Loading PR description...")
-                            .font(.caption)
+                            .font(.app(.caption))
                             .foregroundStyle(.secondary)
                         Spacer()
                     }
@@ -1022,7 +1022,7 @@ struct CardDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Prompt")
-                    .font(.subheadline.bold())
+                    .font(.app(.subheadline, weight: .bold))
                     .foregroundStyle(.secondary)
 
                 if let body = card.link.promptBody {
@@ -1066,7 +1066,7 @@ struct CardDetailView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .font(.caption)
+        .font(.app(.caption))
     }
 
     private func resolvedIssueURL(_ issue: IssueLink) -> URL? {
@@ -1147,18 +1147,18 @@ struct CardDetailView: View {
                     if totalApprovals > 0 {
                         HStack(spacing: 2) {
                             Image(systemName: "checkmark")
-                                .font(.system(size: 10, weight: .bold))
+                                .font(.app(size: 10, weight: .bold))
                             Text(verbatim: "\(totalApprovals)")
-                                .font(.system(size: 12, weight: .medium))
+                                .font(.app(size: 12, weight: .medium))
                         }
                         .foregroundStyle(.green)
                     }
                     if totalThreads > 0 {
                         HStack(spacing: 2) {
                             Image(systemName: "bubble.left")
-                                .font(.system(size: 10))
+                                .font(.app(size: 10))
                             Text(verbatim: "\(totalThreads)")
-                                .font(.system(size: 12, weight: .medium))
+                                .font(.app(size: 12, weight: .medium))
                         }
                         .foregroundStyle(.orange)
                     }
@@ -1191,6 +1191,7 @@ struct CardDetailView: View {
     @ViewBuilder
     private func mergeButton(pr: PRLink) -> some View {
         let canMerge = isMergeable
+        let errorMsg = mergeStatusError
         Button {
             guard canMerge, !isMerging, let repoRoot = card.link.projectPath else { return }
             isMerging = true
@@ -1216,29 +1217,36 @@ struct CardDetailView: View {
                 if isMerging {
                     ProgressView()
                         .controlSize(.small)
-                } else if let error = mergeStatusError {
+                } else if errorMsg != nil {
                     Image(systemName: "exclamationmark.triangle")
-                    let _ = error // suppress unused warning, used in .help below
                 } else {
                     Image(systemName: "arrow.triangle.merge")
                 }
-                Text(canMerge ? "Merge" : mergeStatusError != nil ? "Merge" : "Merge Blocked")
+                Text("Merge")
             }
-            .font(.system(size: 13))
-            .foregroundStyle(canMerge ? Color.green.opacity(0.8) : mergeStatusError != nil ? Color.orange.opacity(0.7) : Color.secondary.opacity(0.6))
+            .font(.app(size: 13))
+            .foregroundStyle(canMerge ? Color.green.opacity(0.8) : errorMsg != nil ? Color.orange.opacity(0.7) : Color.secondary.opacity(0.6))
             .padding(.horizontal, 12)
             .frame(height: 36)
-            .background((canMerge ? Color.green : mergeStatusError != nil ? Color.orange : Color.secondary).opacity(0.08), in: Capsule())
+            .background((canMerge ? Color.green : errorMsg != nil ? Color.orange : Color.secondary).opacity(0.08), in: Capsule())
             .background(.ultraThinMaterial, in: Capsule())
         }
         .buttonStyle(HoverFeedbackStyle())
         .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
         .disabled(!canMerge || isMerging)
-        .help(canMerge ? "Merge pull request" : mergeStatusError ?? "PR cannot be merged yet")
+        .overlay {
+            // Overlay captures hover on disabled button for tooltip
+            if let errorMsg {
+                Color.clear
+                    .contentShape(Capsule())
+                    .help(errorMsg)
+            }
+        }
+        .help(canMerge ? "Merge pull request" : "")
         .popover(isPresented: .init(get: { mergeError != nil }, set: { if !$0 { mergeError = nil } })) {
             if let err = mergeError {
                 Text(err)
-                    .font(.caption)
+                    .font(.app(.caption))
                     .padding(8)
                     .frame(maxWidth: 300)
             }
@@ -1248,8 +1256,8 @@ struct CardDetailView: View {
     private var actionsMenuButton: some View {
         NSMenuButton {
             Image(systemName: "ellipsis")
-                .font(.caption)
-                .frame(width: 36, height: 36)
+                .font(.app(.caption))
+                .frame(width: CGFloat(36).scaled, height: CGFloat(36).scaled)
                 .contentShape(Circle())
         } menuItems: {
             buildActionsMenu()
@@ -1491,7 +1499,7 @@ struct CardDetailView: View {
             } icon: {
                 Image(systemName: icon)
             }
-            .font(.caption)
+            .font(.app(.caption))
             .foregroundStyle(.secondary)
             .lineLimit(1)
             .truncationMode(.middle)
@@ -1501,7 +1509,7 @@ struct CardDetailView: View {
                     NSWorkspace.shared.open(parsed)
                 } label: {
                     Image(systemName: "arrow.up.forward.app")
-                        .font(.caption2)
+                        .font(.app(.caption2))
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.borderless)
@@ -1512,7 +1520,7 @@ struct CardDetailView: View {
                     showCopyToast("\(label) link copied to clipboard")
                 } label: {
                     Image(systemName: "link")
-                        .font(.caption2)
+                        .font(.app(.caption2))
                         .foregroundStyle(.tertiary)
                 }
                 .buttonStyle(.borderless)
@@ -1524,7 +1532,7 @@ struct CardDetailView: View {
                     onUnlink()
                 } label: {
                     Image(systemName: "xmark")
-                        .font(.system(size: 8, weight: .bold))
+                        .font(.app(size: 8, weight: .bold))
                         .foregroundStyle(.tertiary)
                 }
                 .buttonStyle(.borderless)
@@ -1559,10 +1567,10 @@ private struct SessionIdRow: View {
         HStack(spacing: 4) {
             HStack(spacing: 4) {
                 SessionIcon()
-                    .frame(width: 12, height: 12)
+                    .frame(width: CGFloat(12).scaled, height: CGFloat(12).scaled)
                     .opacity(0.5)
                 Text(sessionId)
-                    .font(.caption)
+                    .font(.app(.caption))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -1578,9 +1586,9 @@ private struct SessionIdRow: View {
                 }
             } label: {
                 Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                    .font(.caption2)
+                    .font(.app(.caption2))
                     .foregroundStyle(.secondary)
-                    .frame(width: 12, height: 12)
+                    .frame(width: CGFloat(12).scaled, height: CGFloat(12).scaled)
             }
             .buttonStyle(.borderless)
             .help("Copy to clipboard")
@@ -1596,7 +1604,7 @@ private struct CopyableRow: View {
     var body: some View {
         HStack(spacing: 4) {
             Label(text, systemImage: icon)
-                .font(.caption)
+                .font(.app(.caption))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -1611,9 +1619,9 @@ private struct CopyableRow: View {
                 }
             } label: {
                 Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                    .font(.caption2)
+                    .font(.app(.caption2))
                     .foregroundStyle(.secondary)
-                    .frame(width: 12, height: 12)
+                    .frame(width: CGFloat(12).scaled, height: CGFloat(12).scaled)
             }
             .buttonStyle(.borderless)
             .help("Copy to clipboard")
@@ -1680,7 +1688,7 @@ struct RenameSessionDialog: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Rename Session")
-                .font(.title3)
+                .font(.app(.title3))
                 .fontWeight(.semibold)
 
             TextField("Session name", text: $name)

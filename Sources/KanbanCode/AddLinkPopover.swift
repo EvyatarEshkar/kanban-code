@@ -13,7 +13,7 @@ struct AddLinkPopover: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Add Link")
-                .font(.subheadline.bold())
+                .font(.app(.subheadline).bold())
 
             Picker("Type", selection: $linkType) {
                 Text("Branch").tag("branch")

@@ -88,10 +88,10 @@ struct BoardView: View {
             if let error = store.state.error {
                 HStack(spacing: 10) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.title3)
+                        .font(.app(.title3))
                         .foregroundStyle(.orange.opacity(0.7))
                     Text(error)
-                        .font(.body.weight(.medium))
+                        .font(.app(.body, weight: .medium))
                         .lineLimit(2)
                     Spacer()
                     Button("Dismiss") {
@@ -118,15 +118,15 @@ struct BoardView: View {
                         let name = store.state.configuredProjects.first(where: { $0.path == projectPath })?.name
                             ?? (projectPath as NSString).lastPathComponent
                         Text("No sessions yet for \(name)")
-                            .font(.title3)
+                            .font(.app(.title3))
                             .foregroundStyle(.secondary)
                     } else {
                         Text("No sessions found")
-                            .font(.title3)
+                            .font(.app(.title3))
                             .foregroundStyle(.secondary)
                     }
                     Text("Create a new task or start a Claude session to get going.")
-                        .font(.caption)
+                        .font(.app(.caption))
                         .foregroundStyle(.tertiary)
 
                     Button(action: onNewTask) {

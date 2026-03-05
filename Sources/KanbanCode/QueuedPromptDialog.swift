@@ -24,12 +24,12 @@ struct QueuedPromptDialog: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(existingPrompt != nil ? "Edit Queued Prompt" : "Queue Prompt")
-                .font(.title3)
+                .font(.app(.title3))
                 .fontWeight(.semibold)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("Prompt")
-                    .font(.caption)
+                    .font(.app(.caption))
                     .foregroundStyle(.secondary)
 
                 PromptEditor(
@@ -45,7 +45,7 @@ struct QueuedPromptDialog: View {
             }
 
             Toggle("Send automatically when Claude finishes", isOn: $sendAutomatically)
-                .font(.callout)
+                .font(.app(.callout))
 
             HStack {
                 Spacer()

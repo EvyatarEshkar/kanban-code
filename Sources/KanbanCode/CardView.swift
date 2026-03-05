@@ -22,7 +22,7 @@ struct CardView: View {
         VStack(alignment: .leading, spacing: 6) {
             // Title
             Text(card.displayTitle)
-                .font(.system(.body, weight: .medium))
+                .font(.app(.body, weight: .medium))
                 .lineLimit(2)
                 .foregroundStyle(.primary)
 
@@ -30,12 +30,12 @@ struct CardView: View {
             HStack(spacing: 4) {
                 if let projectName = card.projectName {
                     Label(projectName, systemImage: "folder")
-                        .font(.caption)
+                        .font(.app(.caption))
                         .foregroundStyle(.secondary)
                 }
                 if let branch = card.link.worktreeLink?.branch {
                     Label(branch, systemImage: "arrow.triangle.branch")
-                        .font(.caption)
+                        .font(.app(.caption))
                         .foregroundStyle(.secondary)
                 }
             }
@@ -45,14 +45,14 @@ struct CardView: View {
             HStack(spacing: 6) {
                 if card.link.cardLabel == .session {
                     SessionIcon()
-                        .frame(width: 14, height: 14)
+                        .frame(width: CGFloat(14).scaled, height: CGFloat(14).scaled)
                         .opacity(0.4)
                 } else {
                     CardLabelBadge(label: card.link.cardLabel)
                 }
 
                 Text(card.relativeTime)
-                    .font(.caption2)
+                    .font(.app(.caption2))
                     .foregroundStyle(.tertiary)
 
                 Spacer()
@@ -61,11 +61,11 @@ struct CardView: View {
                 if let tmux = card.link.tmuxLink {
                     HStack(spacing: 2) {
                         Image(systemName: "terminal")
-                            .font(.caption2)
+                            .font(.app(.caption2))
                             .foregroundStyle(.green)
                         if tmux.terminalCount > 1 {
                             Text(verbatim: "\(tmux.terminalCount)")
-                                .font(.system(size: 9, weight: .bold))
+                                .font(.app(size: 9, weight: .bold))
                                 .foregroundStyle(.green)
                         }
                     }
@@ -77,7 +77,7 @@ struct CardView: View {
                     PRBadge(status: card.link.worstPRStatus, prNumber: primary.number, unresolvedThreads: totalThreads)
                     if card.link.prLinks.count > 1 {
                         Text(verbatim: "+\(card.link.prLinks.count - 1)")
-                            .font(.system(size: 9, weight: .medium))
+                            .font(.app(size: 9, weight: .medium))
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -86,9 +86,9 @@ struct CardView: View {
                 if let issue = card.link.issueLink {
                     HStack(spacing: 2) {
                         Image(systemName: "circle.circle")
-                            .font(.caption2)
+                            .font(.app(.caption2))
                         Text(verbatim: "\(issue.number)")
-                            .font(.caption2)
+                            .font(.app(.caption2))
                     }
                     .foregroundStyle(.secondary)
                 }
@@ -96,7 +96,7 @@ struct CardView: View {
                 // Remote execution indicator
                 if card.link.isRemote {
                     Image(systemName: "cloud")
-                        .font(.caption2)
+                        .font(.app(.caption2))
                         .foregroundStyle(.teal)
                 }
             }
@@ -111,7 +111,7 @@ struct CardView: View {
             } else if card.column == .backlog {
                 Button(action: onStart) {
                     Image(systemName: "play.fill")
-                        .font(.system(size: 10))
+                        .font(.app(size: 10))
                         .foregroundStyle(Color.green.opacity(0.8))
                         .padding(.horizontal, 9)
                         .padding(.vertical, 6)
@@ -265,7 +265,7 @@ struct CardLabelBadge: View {
 
     var body: some View {
         Text(label.rawValue)
-            .font(.system(size: 8, weight: .bold, design: .rounded))
+            .font(.app(size: 8, weight: .bold, design: .rounded))
             .foregroundStyle(colorScheme == .dark ? .black : .white)
             .padding(.horizontal, 5)
             .padding(.vertical, 2)

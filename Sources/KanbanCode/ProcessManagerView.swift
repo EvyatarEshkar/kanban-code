@@ -152,7 +152,7 @@ struct ProcessManagerView: View {
                         .lineLimit(1)
                     if isOurSession(session) {
                         Text("managed")
-                            .font(.caption2)
+                            .font(.app(.caption2))
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 4)
                             .padding(.vertical, 1)
@@ -493,10 +493,10 @@ struct ProcessManagerView: View {
                 .foregroundStyle(.orange)
             VStack(alignment: .leading, spacing: 2) {
                 Text("\(name) not found")
-                    .font(.callout)
+                    .font(.app(.callout))
                     .fontWeight(.medium)
                 Text("Searched: \(paths.joined(separator: ", "))")
-                    .font(.caption)
+                    .font(.app(.caption))
                     .foregroundStyle(.secondary)
             }
             Spacer()

@@ -12,16 +12,16 @@ struct PRBadge: View {
         HStack(spacing: 3) {
             if status == .approved {
                 Image(systemName: "checkmark")
-                    .font(.system(size: 8, weight: .bold))
+                    .font(.app(size: 8, weight: .bold))
             }
             Text(verbatim: "#\(prNumber)")
-                .font(.system(size: 10, weight: .medium, design: .rounded))
+                .font(.app(size: 10, weight: .medium, design: .rounded))
             if unresolvedThreads > 0 {
                 HStack(spacing: 1) {
                     Image(systemName: "bubble.left")
-                        .font(.system(size: 7))
+                        .font(.app(size: 7))
                     Text(verbatim: "\(unresolvedThreads)")
-                        .font(.system(size: 9, weight: .medium))
+                        .font(.app(size: 9, weight: .medium))
                 }
                 .foregroundStyle(.orange)
             }

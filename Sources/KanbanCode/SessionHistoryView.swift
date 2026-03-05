@@ -53,17 +53,17 @@ struct SessionHistoryView: View {
                 ProgressView()
                     .controlSize(.small)
                 Text("Loading conversation...")
-                    .font(.caption)
+                    .font(.app(.caption))
                     .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if turns.isEmpty {
             VStack {
                 Image(systemName: "text.bubble")
-                    .font(.title2)
+                    .font(.app(.title2))
                     .foregroundStyle(.tertiary)
                 Text("No conversation history")
-                    .font(.caption)
+                    .font(.app(.caption))
                     .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -89,7 +89,7 @@ struct SessionHistoryView: View {
                                     ProgressView()
                                         .controlSize(.mini)
                                     Text("Loading history…")
-                                        .font(.caption)
+                                        .font(.app(.caption))
                                 }
                                 .foregroundStyle(.white.opacity(0.5))
                                 .frame(maxWidth: .infinity)
@@ -182,12 +182,12 @@ struct SessionHistoryView: View {
     private var searchBar: some View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
-                .font(.caption)
+                .font(.app(.caption))
                 .foregroundStyle(.white.opacity(0.5))
 
             TextField("Search history...", text: $searchText, prompt: Text("Search history...").foregroundStyle(.white.opacity(0.3)))
                 .textFieldStyle(.plain)
-                .font(.system(.caption, design: .monospaced))
+                .font(.app(.caption, design: .monospaced))
                 .foregroundStyle(.white)
                 .focused($isSearchFieldFocused)
                 .onKeyPress(.escape) { dismissSearch(); return .handled }
@@ -202,28 +202,28 @@ struct SessionHistoryView: View {
 
                     if !searchMatchIndices.isEmpty {
                         Text("\(searchMatchIndices.count) found…")
-                            .font(.caption2)
+                            .font(.app(.caption2))
                             .foregroundStyle(.white.opacity(0.4))
                     }
                 } else if searchMatchIndices.isEmpty {
                     Text("0 results")
-                        .font(.caption2)
+                        .font(.app(.caption2))
                         .foregroundStyle(.white.opacity(0.4))
                 } else {
                     Text("\(searchMatchIndices.count - currentMatchPosition)/\(searchMatchIndices.count)")
-                        .font(.caption2)
+                        .font(.app(.caption2))
                         .foregroundStyle(.white.opacity(0.6))
 
                     Button { navigateSearch(forward: false) } label: {
                         Image(systemName: "chevron.up")
-                            .font(.caption2)
+                            .font(.app(.caption2))
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.white.opacity(0.6))
 
                     Button { navigateSearch(forward: true) } label: {
                         Image(systemName: "chevron.down")
-                            .font(.caption2)
+                            .font(.app(.caption2))
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.white.opacity(0.6))
@@ -232,7 +232,7 @@ struct SessionHistoryView: View {
 
             Button { dismissSearch() } label: {
                 Image(systemName: "xmark")
-                    .font(.caption2)
+                    .font(.app(.caption2))
             }
             .buttonStyle(.plain)
             .foregroundStyle(.white.opacity(0.5))
@@ -335,14 +335,14 @@ struct SessionHistoryView: View {
             Image(systemName: "clock.arrow.circlepath")
                 .foregroundStyle(.orange)
             Text("Click a turn to restore to. Everything after will be removed.")
-                .font(.caption)
+                .font(.app(.caption))
                 .foregroundStyle(.white.opacity(0.8))
             Spacer()
             Button {
                 onCancelCheckpoint?()
             } label: {
                 Image(systemName: "xmark")
-                    .font(.caption)
+                    .font(.app(.caption))
                     .foregroundStyle(.white.opacity(0.6))
             }
             .buttonStyle(.borderless)
@@ -460,15 +460,15 @@ struct TurnBlockView: View {
                     HStack(alignment: .top, spacing: 0) {
                         if i == 0 {
                             Text("❯ ")
-                                .font(.system(.caption, design: .monospaced))
+                                .font(.app(.caption, design: .monospaced))
                                 .foregroundStyle(.green)
                                 .fontWeight(.bold)
                         } else {
                             Text("  ")
-                                .font(.system(.caption, design: .monospaced))
+                                .font(.app(.caption, design: .monospaced))
                         }
                         styledText(textBlocks[i].text, color: .white)
-                            .font(.system(.caption, design: .monospaced))
+                            .font(.app(.caption, design: .monospaced))
                             .textSelection(.enabled)
                     }
                 }
@@ -479,11 +479,11 @@ struct TurnBlockView: View {
             } else {
                 HStack(alignment: .top, spacing: 0) {
                     Text("❯ ")
-                        .font(.system(.caption, design: .monospaced))
+                        .font(.app(.caption, design: .monospaced))
                         .foregroundStyle(.green)
                         .fontWeight(.bold)
                     styledText(turn.textPreview, color: .white)
-                        .font(.system(.caption, design: .monospaced))
+                        .font(.app(.caption, design: .monospaced))
                         .textSelection(.enabled)
                 }
             }
@@ -498,10 +498,10 @@ struct TurnBlockView: View {
                 // Fallback for old data without content blocks
                 HStack(alignment: .top, spacing: 0) {
                     Text("● ")
-                        .font(.system(.caption, design: .monospaced))
+                        .font(.app(.caption, design: .monospaced))
                         .foregroundStyle(.white)
                     styledText(turn.textPreview, color: Color(white: 0.85))
-                        .font(.system(.caption, design: .monospaced))
+                        .font(.app(.caption, design: .monospaced))
                         .textSelection(.enabled)
                         .lineLimit(20)
                 }
@@ -559,14 +559,14 @@ struct TurnBlockView: View {
         return HStack(alignment: .top, spacing: 0) {
             if isFirst {
                 Text("● ")
-                    .font(.system(.caption, design: .monospaced))
+                    .font(.app(.caption, design: .monospaced))
                     .foregroundStyle(.white)
             } else {
                 Text("  ")
-                    .font(.system(.caption, design: .monospaced))
+                    .font(.app(.caption, design: .monospaced))
             }
             styledText(trimmed, color: Color(white: 0.85))
-                .font(.system(.caption, design: .monospaced))
+                .font(.app(.caption, design: .monospaced))
                 .textSelection(.enabled)
                 .lineLimit(30)
         }
@@ -577,14 +577,14 @@ struct TurnBlockView: View {
     private func toolUseLine(name: String, displayText: String) -> some View {
         HStack(alignment: .top, spacing: 0) {
             Text("  ● ")
-                .font(.system(.caption, design: .monospaced))
+                .font(.app(.caption, design: .monospaced))
                 .foregroundStyle(.green)
             styledText(name, color: .green.opacity(0.8))
-                .font(.system(.caption, design: .monospaced))
+                .font(.app(.caption, design: .monospaced))
             if displayText != name {
                 let args = displayText.hasPrefix(name) ? String(displayText.dropFirst(name.count)) : "(\(displayText))"
                 styledText(args, color: Color(white: 0.5))
-                    .font(.system(.caption, design: .monospaced))
+                    .font(.app(.caption, design: .monospaced))
                     .lineLimit(2)
             }
         }
@@ -595,10 +595,10 @@ struct TurnBlockView: View {
     private func toolResultLine(_ block: ContentBlock) -> some View {
         HStack(alignment: .top, spacing: 0) {
             Text("  ⎿ ")
-                .font(.system(.caption, design: .monospaced))
+                .font(.app(.caption, design: .monospaced))
                 .foregroundStyle(Color(white: 0.35))
             styledText(block.text, color: Color(white: 0.35))
-                .font(.system(.caption, design: .monospaced))
+                .font(.app(.caption, design: .monospaced))
                 .lineLimit(3)
         }
     }
@@ -608,10 +608,10 @@ struct TurnBlockView: View {
     private func thinkingLine(_ text: String) -> some View {
         HStack(alignment: .top, spacing: 0) {
             Text("  ∴ ")
-                .font(.system(.caption, design: .monospaced))
+                .font(.app(.caption, design: .monospaced))
                 .foregroundStyle(Color(white: 0.3))
             Text("Thinking...")
-                .font(.system(.caption2, design: .monospaced))
+                .font(.app(.caption2, design: .monospaced))
                 .foregroundStyle(Color(white: 0.3))
                 .italic()
         }

@@ -88,7 +88,7 @@ struct DroppableColumnView: View {
                     .overlay(alignment: .top) {
                         if isMergeTarget && canMerge {
                             Text("Merge")
-                                .font(.caption2.bold())
+                                .font(.app(.caption2).bold())
                                 .foregroundStyle(.white)
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 2)
@@ -132,7 +132,7 @@ struct DroppableColumnView: View {
                    let dragging = dragState.draggingCard, dragState.sourceColumn != column {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(dragging.displayTitle)
-                            .font(.system(.body, weight: .medium))
+                            .font(.app(.body, weight: .medium))
                             .lineLimit(2)
                             .foregroundStyle(.primary)
                     }
@@ -164,7 +164,7 @@ struct DroppableColumnView: View {
         .overlay(alignment: .top) {
             HStack {
                 Text(column.displayName)
-                    .font(.headline)
+                    .font(.app(.headline))
                     .foregroundStyle(.primary)
 
                 Spacer()
@@ -178,7 +178,7 @@ struct DroppableColumnView: View {
                                 .controlSize(.mini)
                         } else {
                             Image(systemName: "arrow.clockwise")
-                                .font(.caption)
+                                .font(.app(.caption))
                         }
                     }
                     .buttonStyle(.borderless)
@@ -187,7 +187,7 @@ struct DroppableColumnView: View {
                 }
 
                 Text("\(cards.count)")
-                    .font(.caption)
+                    .font(.app(.caption))
                     .fontWeight(.medium)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)

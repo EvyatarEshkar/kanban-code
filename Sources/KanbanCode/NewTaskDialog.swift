@@ -27,13 +27,13 @@ struct NewTaskDialog: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("New Task")
-                .font(.title3)
+                .font(.app(.title3))
                 .fontWeight(.semibold)
 
             // Prompt
             VStack(alignment: .leading, spacing: 4) {
                 Text("Prompt")
-                    .font(.caption)
+                    .font(.app(.caption))
                     .foregroundStyle(.secondary)
 
                 PromptEditor(
@@ -51,13 +51,13 @@ struct NewTaskDialog: View {
             // Title (optional)
             TextField("Title (optional)", text: $title)
                 .textFieldStyle(.roundedBorder)
-                .font(.callout)
+                .font(.app(.callout))
 
             // Project picker
             if projects.isEmpty {
                 TextField("Project path (optional)", text: $customPath)
                     .textFieldStyle(.roundedBorder)
-                    .font(.caption)
+                    .font(.app(.caption))
             } else {
                 Picker("Project", selection: $selectedProjectPath) {
                     ForEach(projects) { project in
@@ -70,29 +70,29 @@ struct NewTaskDialog: View {
                 if selectedProjectPath == Self.customPathSentinel {
                     TextField("Project path", text: $customPath)
                         .textFieldStyle(.roundedBorder)
-                        .font(.caption)
+                        .font(.app(.caption))
                 }
             }
 
             // Start immediately toggle
             Toggle("Start immediately", isOn: $startImmediately)
-                .font(.callout)
+                .font(.app(.callout))
 
             // Launch options (shown when "Start immediately" is checked)
             if startImmediately {
                 VStack(alignment: .leading, spacing: 6) {
                     Toggle("Create worktree", isOn: isGitRepo ? $createWorktree : .constant(false))
-                        .font(.callout)
+                        .font(.app(.callout))
                         .disabled(!isGitRepo)
                     if !isGitRepo {
                         Label("Not a git repository", systemImage: "info.circle")
-                            .font(.caption2)
+                            .font(.app(.caption2))
                             .foregroundStyle(.secondary)
                             .padding(.leading, 20)
                     }
 
                     Toggle("Run remotely", isOn: hasRemoteConfig ? $runRemotely : .constant(false))
-                        .font(.callout)
+                        .font(.app(.callout))
                         .disabled(!hasRemoteConfig)
                     if !hasRemoteConfig {
                         Label(
@@ -101,22 +101,22 @@ struct NewTaskDialog: View {
                                 : "Configure remote execution in Settings > Remote",
                             systemImage: "info.circle"
                         )
-                            .font(.caption2)
+                            .font(.app(.caption2))
                             .foregroundStyle(.secondary)
                             .padding(.leading, 20)
                     }
 
                     Toggle("Dangerously skip permissions", isOn: $dangerouslySkipPermissions)
-                        .font(.callout)
+                        .font(.app(.callout))
                 }
 
                 // Editable command
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Command")
-                        .font(.caption)
+                        .font(.app(.caption))
                         .foregroundStyle(.secondary)
                     TextEditor(text: $command)
-                        .font(.caption.monospaced())
+                        .font(.app(.caption).monospaced())
                         .frame(minHeight: 36, maxHeight: 80)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(4)
