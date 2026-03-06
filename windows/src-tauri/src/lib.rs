@@ -6,6 +6,7 @@ mod coordination_store;
 mod gh_cli;
 mod git_worktree;
 mod jsonl_parser;
+mod pty;
 mod session_discovery;
 mod settings_store;
 mod shell_command;
@@ -30,6 +31,7 @@ pub struct AppState {
     pub coordination_store: Arc<CoordinationStore>,
     pub settings_store: Arc<SettingsStore>,
     pub session_discovery: Arc<SessionDiscovery>,
+    pub pty_manager: Arc<pty::PtyManager>,
 }
 
 // ── Tauri Commands ───────────────────────────────────────────────────────────
@@ -228,6 +230,79 @@ async fn open_in_editor(path: String, editor: Option<String>) -> Result<(), Stri
         .map_err(|e| e.to_string())
 }
 
+// ── PTY Commands ────────────────────────────────────────────────────────────
+
+#[tauri::command]
+async fn pty_spawn(
+    id: String,
+    command: Vec<String>,
+    cols: u16,
+    rows: u16,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let pty_id = id.clone();
+    let pty_id_exit = id.clone();
+    let app_output = app.clone();
+    let app_exit = app.clone();
+
+    state
+        .pty_manager
+        .spawn(
+            id,
+            command,
+            cols,
+            rows,
+            move |data| {
+                let _ = app_output.emit(&format!("pty-output-{}", pty_id), data);
+            },
+            move || {
+                let _ = app_exit.emit(&format!("pty-exit-{}", pty_id_exit), ());
+            },
+        )
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn pty_write(
+    id: String,
+    data: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    state
+        .pty_manager
+        .write(&id, data.as_bytes())
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn pty_resize(
+    id: String,
+    cols: u16,
+    rows: u16,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    state
+        .pty_manager
+        .resize(&id, cols, rows)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn pty_kill(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    state
+        .pty_manager
+        .kill(&id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 // ── Background polling ───────────────────────────────────────────────────────
 
 fn start_polling(app: tauri::AppHandle) {
@@ -413,6 +488,7 @@ pub fn run() {
     let settings_store = Arc::new(SettingsStore::new(None));
     let session_discovery = Arc::new(SessionDiscovery::new(None));
     let board_state = Arc::new(Mutex::new(BoardState::default()));
+    let pty_manager = Arc::new(pty::PtyManager::new());
 
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
@@ -422,6 +498,7 @@ pub fn run() {
             coordination_store,
             settings_store,
             session_discovery,
+            pty_manager,
         })
         .invoke_handler(tauri::generate_handler![
             get_board_state,
@@ -436,6 +513,10 @@ pub fn run() {
             search_sessions,
             launch_session,
             open_in_editor,
+            pty_spawn,
+            pty_write,
+            pty_resize,
+            pty_kill,
         ])
         .setup(|app| {
             build_tray(app)?;

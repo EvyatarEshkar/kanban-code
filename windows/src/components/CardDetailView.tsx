@@ -1,30 +1,35 @@
 import { useEffect, useState } from "react";
 import {
   getTranscript,
-  launchSession,
   openInEditor,
   useBoardStore,
 } from "../store/boardStore";
+import { useTheme, t } from "../theme";
 import type { Turn, TranscriptPage } from "../types";
+import TerminalView from "./Terminal";
 
-type Tab = "history" | "issue" | "pr" | "prompt";
+type Tab = "terminal" | "history" | "issue" | "pr" | "prompt";
 
 export default function CardDetailView() {
   const { selectedCard, selectCard, renameCard } = useBoardStore();
   const card = selectedCard();
+  const { theme } = useTheme();
+  const c = t(theme);
 
-  const [activeTab, setActiveTab] = useState<Tab>("history");
+  const [activeTab, setActiveTab] = useState<Tab>("terminal");
   const [turns, setTurns] = useState<Turn[]>([]);
   const [transcriptPage, setTranscriptPage] = useState<TranscriptPage | null>(null);
   const [loadingTranscript, setLoadingTranscript] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState("");
+  const [terminalActive, setTerminalActive] = useState(false);
 
   useEffect(() => {
     if (!card) return;
-    setActiveTab("history");
+    setActiveTab(card.link.sessionLink?.sessionId ? "terminal" : "history");
     setTurns([]);
     setTranscriptPage(null);
+    setTerminalActive(false);
     if (card.link.sessionLink?.sessionId) {
       loadTranscript(card.link.sessionLink.sessionId, 0, true);
     }
@@ -56,15 +61,36 @@ export default function CardDetailView() {
     setIsEditing(false);
   };
 
+  // Build the command to resume a Claude session via WSL
+  const buildResumeCommand = (): string[] => {
+    return ["wsl.exe", "--", "bash", "-lic", `claude --resume ${sessionId}`];
+  };
+
+  const handleStartTerminal = () => {
+    setTerminalActive(true);
+    setActiveTab("terminal");
+  };
+
   return (
-    <div className="w-[360px] min-w-[360px] flex flex-col border-l border-white/[0.06] bg-[#0d0d10] overflow-hidden">
+    <div
+      className="w-[420px] min-w-[420px] flex flex-col overflow-hidden"
+      style={{
+        background: c.bgDetail,
+        borderLeft: `1px solid ${c.border}`,
+      }}
+    >
       {/* Header */}
-      <div className="px-4 pt-4 pb-3 border-b border-white/[0.06] shrink-0">
+      <div className="px-4 pt-4 pb-3 shrink-0" style={{ borderBottom: `1px solid ${c.border}` }}>
         <div className="flex items-start justify-between gap-2">
           {isEditing ? (
             <input
               autoFocus
-              className="flex-1 bg-[#0a0a0c] border border-[#4f8ef7]/40 rounded-lg px-3 py-1.5 text-[14px] text-zinc-100 outline-none"
+              className="flex-1 rounded-lg px-3 py-1.5 text-[14px] outline-none"
+              style={{
+                background: c.bgInput,
+                border: `1px solid rgba(79,142,247,0.4)`,
+                color: c.textPrimary,
+              }}
               value={editName}
               onChange={(e) => setEditName(e.target.value)}
               onBlur={handleRename}
@@ -75,7 +101,8 @@ export default function CardDetailView() {
             />
           ) : (
             <h2
-              className="flex-1 text-[15px] font-semibold text-zinc-100 leading-snug cursor-text"
+              className="flex-1 text-[15px] font-semibold leading-snug cursor-text"
+              style={{ color: c.textPrimary }}
               onClick={() => { setEditName(card.displayTitle); setIsEditing(true); }}
               title="Click to rename"
             >
@@ -84,7 +111,8 @@ export default function CardDetailView() {
           )}
           <button
             onClick={() => selectCard(null)}
-            className="text-zinc-500 hover:text-zinc-300 mt-0.5 shrink-0 transition-colors"
+            className="mt-0.5 shrink-0 transition-colors"
+            style={{ color: c.textMuted }}
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
@@ -94,43 +122,30 @@ export default function CardDetailView() {
 
         {/* Meta badges */}
         <div className="flex flex-wrap gap-1.5 mt-2.5">
-          {card.projectName && (
-            <span className="text-[12px] text-zinc-500">{card.projectName}</span>
-          )}
-          {branch && (
-            <span className="text-[12px] text-[#4f8ef7] bg-[#4f8ef7]/10 px-2 py-0.5 rounded">
-              {branch}
-            </span>
-          )}
-          {pr && (
-            <span className="text-[12px] text-[#3fb950] bg-[#3fb950]/10 px-2 py-0.5 rounded">
-              PR #{pr.number}
-            </span>
-          )}
-          {issue && (
-            <span className="text-[12px] text-[#d29922] bg-[#d29922]/10 px-2 py-0.5 rounded">
-              #{issue.number}
-            </span>
-          )}
+          {card.projectName && <span className="text-[12px]" style={{ color: c.textMuted }}>{card.projectName}</span>}
+          {branch && <span className="text-[12px] text-[#4f8ef7] bg-[#4f8ef7]/10 px-2 py-0.5 rounded">{branch}</span>}
+          {pr && <span className="text-[12px] text-[#3fb950] bg-[#3fb950]/10 px-2 py-0.5 rounded">PR #{pr.number}</span>}
+          {issue && <span className="text-[12px] text-[#d29922] bg-[#d29922]/10 px-2 py-0.5 rounded">#{issue.number}</span>}
         </div>
 
         {/* Action buttons */}
         <div className="flex gap-2 mt-3">
           {sessionId && (
             <button
-              onClick={() => launchSession(sessionId)}
+              onClick={handleStartTerminal}
               className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg bg-[#4f8ef7] hover:bg-[#5b97fa] text-white text-[13px] font-semibold transition-colors"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 3 19 12 5 21V3z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z" />
               </svg>
-              Resume
+              {terminalActive ? "Terminal" : "Resume in Terminal"}
             </button>
           )}
           {projectPath && (
             <button
               onClick={() => openInEditor(projectPath)}
-              className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg border border-white/10 text-zinc-300 text-[13px] hover:bg-white/5 transition-colors"
+              className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-[13px] transition-colors"
+              style={{ border: `1px solid ${c.border}`, color: c.textSecondary }}
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="m10 20-7-7 7-7M17 20l7-7-7-7" />
@@ -142,9 +157,10 @@ export default function CardDetailView() {
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-white/[0.06] shrink-0">
-        {(["history", "issue", "pr", "prompt"] as Tab[]).map((tab) => {
+      <div className="flex shrink-0" style={{ borderBottom: `1px solid ${c.border}` }}>
+        {(["terminal", "history", "issue", "pr", "prompt"] as Tab[]).map((tab) => {
           const disabled =
+            (tab === "terminal" && !sessionId) ||
             (tab === "issue" && !issue) ||
             (tab === "pr" && !pr) ||
             (tab === "prompt" && !card.link.promptBody) ||
@@ -154,13 +170,12 @@ export default function CardDetailView() {
               key={tab}
               disabled={disabled}
               onClick={() => setActiveTab(tab)}
-              className={`flex-1 py-2.5 text-[12px] font-medium capitalize transition-colors ${
-                activeTab === tab
-                  ? "text-[#4f8ef7] border-b-2 border-[#4f8ef7]"
-                  : disabled
-                  ? "text-zinc-700 cursor-not-allowed"
-                  : "text-zinc-500 hover:text-zinc-300"
-              }`}
+              className="flex-1 py-2.5 text-[12px] font-medium capitalize transition-colors"
+              style={{
+                color: activeTab === tab ? "#4f8ef7" : disabled ? c.textDim : c.textMuted,
+                borderBottom: activeTab === tab ? "2px solid #4f8ef7" : "2px solid transparent",
+                cursor: disabled ? "not-allowed" : "pointer",
+              }}
             >
               {tab}
             </button>
@@ -169,27 +184,60 @@ export default function CardDetailView() {
       </div>
 
       {/* Tab content */}
-      <div className="flex-1 overflow-y-auto">
-        {activeTab === "history" && (
-          <HistoryTab
-            turns={turns}
-            transcriptPage={transcriptPage}
-            loading={loadingTranscript}
-            onLoadMore={() => {
-              if (sessionId && transcriptPage?.hasMore)
-                loadTranscript(sessionId, transcriptPage.nextOffset, false);
-            }}
-          />
+      <div className="flex-1 overflow-hidden flex flex-col min-h-0">
+        {activeTab === "terminal" && sessionId && (
+          terminalActive ? (
+            <TerminalView
+              ptyId={`resume-${card.id}`}
+              command={buildResumeCommand()}
+              onExit={() => {}}
+            />
+          ) : (
+            <div className="flex flex-col items-center justify-center flex-1 gap-3 p-6">
+              <svg className="w-10 h-10" style={{ color: c.textDim }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z" />
+              </svg>
+              <p className="text-[13px]" style={{ color: c.textMuted }}>
+                Click "Resume in Terminal" to start an interactive session
+              </p>
+            </div>
+          )
         )}
+
+        {activeTab === "history" && (
+          <div className="overflow-y-auto flex-1">
+            <HistoryTab
+              turns={turns}
+              transcriptPage={transcriptPage}
+              loading={loadingTranscript}
+              onLoadMore={() => {
+                if (sessionId && transcriptPage?.hasMore)
+                  loadTranscript(sessionId, transcriptPage.nextOffset, false);
+              }}
+            />
+          </div>
+        )}
+
         {activeTab === "issue" && issue && (
-          <ContentTab title={issue.title ?? `Issue #${issue.number}`} body={issue.body} url={issue.url} />
+          <div className="overflow-y-auto flex-1">
+            <ContentTab title={issue.title ?? `Issue #${issue.number}`} body={issue.body} url={issue.url} />
+          </div>
         )}
         {activeTab === "pr" && pr && (
-          <ContentTab title={pr.title ?? `PR #${pr.number}`} body={pr.body} url={pr.url} />
+          <div className="overflow-y-auto flex-1">
+            <ContentTab title={pr.title ?? `PR #${pr.number}`} body={pr.body} url={pr.url} />
+          </div>
         )}
         {activeTab === "prompt" && card.link.promptBody && (
-          <div className="p-4">
-            <pre className="text-[13px] text-zinc-300 whitespace-pre-wrap break-words leading-relaxed font-mono bg-white/[0.02] rounded-lg p-3 border border-white/[0.04]">
+          <div className="overflow-y-auto flex-1 p-4">
+            <pre
+              className="text-[13px] whitespace-pre-wrap break-words leading-relaxed font-mono rounded-lg p-3"
+              style={{
+                color: c.textSecondary,
+                background: c.bgAccent("0.02"),
+                border: `1px solid ${c.border}`,
+              }}
+            >
               {card.link.promptBody}
             </pre>
           </div>
@@ -202,12 +250,15 @@ export default function CardDetailView() {
 function HistoryTab({ turns, transcriptPage, loading, onLoadMore }: {
   turns: Turn[]; transcriptPage: TranscriptPage | null; loading: boolean; onLoadMore: () => void;
 }) {
+  const { theme } = useTheme();
+  const c = t(theme);
+
   if (loading && turns.length === 0) {
     return (
       <div className="flex items-center justify-center p-8">
         <div className="flex items-center gap-2">
           <div className="w-4 h-4 border-2 border-[#4f8ef7] border-t-transparent rounded-full animate-spin" />
-          <span className="text-[13px] text-zinc-500">Loading...</span>
+          <span className="text-[13px]" style={{ color: c.textMuted }}>Loading...</span>
         </div>
       </div>
     );
@@ -215,7 +266,7 @@ function HistoryTab({ turns, transcriptPage, loading, onLoadMore }: {
 
   if (turns.length === 0) {
     return (
-      <div className="flex items-center justify-center p-8 text-[13px] text-zinc-600">
+      <div className="flex items-center justify-center p-8 text-[13px]" style={{ color: c.textDim }}>
         No history yet
       </div>
     );
@@ -223,14 +274,13 @@ function HistoryTab({ turns, transcriptPage, loading, onLoadMore }: {
 
   return (
     <div className="flex flex-col">
-      {turns.map((turn) => (
-        <TurnItem key={turn.index} turn={turn} />
-      ))}
+      {turns.map((turn) => <TurnItem key={turn.index} turn={turn} />)}
       {transcriptPage?.hasMore && (
         <button
           onClick={onLoadMore}
           disabled={loading}
-          className="m-3 py-2 rounded-lg border border-white/[0.06] text-[12px] text-zinc-400 hover:text-zinc-200 hover:border-white/10 transition-colors disabled:opacity-50"
+          className="m-3 py-2 rounded-lg text-[12px] transition-colors disabled:opacity-50"
+          style={{ border: `1px solid ${c.border}`, color: c.textMuted }}
         >
           {loading ? "Loading..." : `Load more (${transcriptPage.totalTurns - turns.length} remaining)`}
         </button>
@@ -240,20 +290,22 @@ function HistoryTab({ turns, transcriptPage, loading, onLoadMore }: {
 }
 
 function TurnItem({ turn }: { turn: Turn }) {
+  const { theme } = useTheme();
+  const c = t(theme);
   const isUser = turn.role === "user";
   return (
-    <div className={`px-4 py-3 border-b border-white/[0.03] ${isUser ? "" : "bg-white/[0.01]"}`}>
+    <div className="px-4 py-3" style={{ borderBottom: `1px solid ${c.bgAccent("0.03")}` }}>
       <div className="flex items-center gap-1.5 mb-1">
         <span className={`text-[11px] font-bold uppercase ${isUser ? "text-[#4f8ef7]" : "text-[#3fb950]"}`}>
           {isUser ? "You" : "Claude"}
         </span>
         {turn.timestamp && (
-          <span className="text-[11px] text-zinc-600">
+          <span className="text-[11px]" style={{ color: c.textDim }}>
             {new Date(turn.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
           </span>
         )}
       </div>
-      <p className="text-[13px] text-zinc-400 leading-relaxed line-clamp-4">
+      <p className="text-[13px] leading-relaxed line-clamp-4" style={{ color: c.textSecondary }}>
         {turn.textPreview || "(tool use)"}
       </p>
     </div>
@@ -261,10 +313,12 @@ function TurnItem({ turn }: { turn: Turn }) {
 }
 
 function ContentTab({ title, body, url }: { title: string; body?: string; url?: string }) {
+  const { theme } = useTheme();
+  const c = t(theme);
   return (
     <div className="p-4 flex flex-col gap-3">
       <div className="flex items-start justify-between gap-2">
-        <h3 className="text-[14px] font-semibold text-zinc-200 leading-snug">{title}</h3>
+        <h3 className="text-[14px] font-semibold leading-snug" style={{ color: c.textPrimary }}>{title}</h3>
         {url && (
           <a href={url} target="_blank" rel="noreferrer" className="text-[#4f8ef7] shrink-0">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -274,11 +328,11 @@ function ContentTab({ title, body, url }: { title: string; body?: string; url?: 
         )}
       </div>
       {body ? (
-        <pre className="text-[13px] text-zinc-400 whitespace-pre-wrap break-words leading-relaxed font-sans">
+        <pre className="text-[13px] whitespace-pre-wrap break-words leading-relaxed font-sans" style={{ color: c.textSecondary }}>
           {body}
         </pre>
       ) : (
-        <p className="text-[13px] text-zinc-600">No description</p>
+        <p className="text-[13px]" style={{ color: c.textDim }}>No description</p>
       )}
     </div>
   );

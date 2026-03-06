@@ -1,6 +1,7 @@
 import {
   DndContext, DragEndEvent, DragOverlay, DragStartEvent,
-  PointerSensor, useSensor, useSensors,
+  PointerSensor, useSensor, useSensors, closestCenter,
+  type DropAnimation, defaultDropAnimationSideEffects,
 } from "@dnd-kit/core";
 import { useState } from "react";
 import { useBoardStore } from "../store/boardStore";
@@ -9,34 +10,60 @@ import { useTheme, t } from "../theme";
 import CardView from "./CardView";
 import ColumnView from "./ColumnView";
 
+const dropAnimation: DropAnimation = {
+  sideEffects: defaultDropAnimationSideEffects({
+    styles: { active: { opacity: "0.5" } },
+  }),
+  duration: 200,
+  easing: "cubic-bezier(0.25, 1, 0.5, 1)",
+};
+
 export default function BoardView() {
   const { moveCard, isLoading, cards, setNewTaskOpen } = useBoardStore();
   const [draggingCard, setDraggingCard] = useState<CardDto | null>(null);
   const { theme } = useTheme();
   const c = t(theme);
 
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+  );
 
-  const handleDragStart = (event: DragStartEvent) => setDraggingCard(event.active.data.current as CardDto);
+  const handleDragStart = (event: DragStartEvent) => {
+    setDraggingCard(event.active.data.current as CardDto);
+  };
+
   const handleDragEnd = (event: DragEndEvent) => {
     setDraggingCard(null);
     const { active, over } = event;
     if (!over) return;
     const card = active.data.current as CardDto;
-    if (card.link.column !== over.id) moveCard(active.id as string, over.id as KanbanColumn);
+    if (card.link.column !== over.id) {
+      moveCard(active.id as string, over.id as KanbanColumn);
+    }
   };
 
   const isEmpty = cards.length === 0 && !isLoading;
 
   return (
     <div className="flex flex-1 overflow-hidden relative">
-      <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+      >
         <div className="flex flex-1 gap-1.5 overflow-x-auto p-2">
           {COLUMNS.map((column) => <ColumnView key={column} column={column} />)}
         </div>
-        <DragOverlay>
+        <DragOverlay dropAnimation={dropAnimation}>
           {draggingCard && (
-            <div className="opacity-90 pointer-events-none">
+            <div style={{
+              opacity: 0.92,
+              transform: "scale(1.03) rotate(1.5deg)",
+              pointerEvents: "none",
+              filter: `drop-shadow(0 12px 24px rgba(0,0,0,0.3))`,
+              transition: "transform 0.15s ease",
+            }}>
               <CardView card={draggingCard} isDragging />
             </div>
           )}

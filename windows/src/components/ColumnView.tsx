@@ -24,16 +24,23 @@ export default function ColumnView({ column }: { column: KanbanColumn }) {
 
   return (
     <div
-      className="flex flex-col min-w-0 flex-1 rounded-xl overflow-hidden transition-colors"
+      className="flex flex-col min-w-0 flex-1 rounded-xl overflow-hidden"
       style={{
         background: isOver ? c.bgColumnHover(accent) : c.bgColumn,
         border: `1px solid ${isOver ? accent + "30" : c.border}`,
+        transition: "background 0.2s ease, border-color 0.25s ease",
       }}
     >
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2.5 shrink-0">
         <div className="flex items-center gap-2">
-          <div className="w-2.5 h-2.5 rounded-full" style={{ background: accent }} />
+          <div
+            className="w-2.5 h-2.5 rounded-full transition-transform"
+            style={{
+              background: accent,
+              transform: isOver ? "scale(1.3)" : "scale(1)",
+            }}
+          />
           <span className="text-[13px] font-semibold" style={{ color: c.textPrimary }}>
             {COLUMN_DISPLAY[column]}
           </span>
@@ -53,13 +60,26 @@ export default function ColumnView({ column }: { column: KanbanColumn }) {
       >
         <SortableContext items={cards.map((c) => c.id)} strategy={verticalListSortingStrategy}>
           {cards.map((card) => (
-            <CardView key={card.id} card={card} />
+            <div
+              key={card.id}
+              style={{ transition: "transform 0.2s ease, opacity 0.2s ease" }}
+            >
+              <CardView card={card} />
+            </div>
           ))}
         </SortableContext>
 
         {cards.length === 0 && (
-          <div className="flex items-center justify-center flex-1 min-h-[80px]">
-            <span className="text-[12px]" style={{ color: c.textDim }}>Drop here</span>
+          <div
+            className="flex items-center justify-center flex-1 min-h-[80px] rounded-lg transition-colors"
+            style={{
+              background: isOver ? accent + "08" : "transparent",
+              border: isOver ? `2px dashed ${accent}40` : "2px dashed transparent",
+            }}
+          >
+            <span className="text-[12px]" style={{ color: isOver ? accent : c.textDim }}>
+              {isOver ? "Drop here" : "No cards"}
+            </span>
           </div>
         )}
       </div>
