@@ -251,10 +251,20 @@ fn start_polling(app: tauri::AppHandle) {
                 let _ = app.emit("board-updated", dto);
 
                 // Send OS notifications for cards where Claude just finished a turn
-                for card in notify_cards {
-                    let title = card.display_title.clone();
-                    let body = "Claude finished — your input is needed.".to_string();
-                    let _ = app.notification().builder().title(title).body(body).show();
+                if !notify_cards.is_empty() {
+                    let settings_ok = state
+                        .settings_store
+                        .read()
+                        .await
+                        .map(|s| s.notifications.notifications_enabled)
+                        .unwrap_or(true);
+                    if settings_ok {
+                        for card in notify_cards {
+                            let title = card.display_title.clone();
+                            let body = "Claude finished — your input is needed.".to_string();
+                            let _ = app.notification().builder().title(title).body(body).show();
+                        }
+                    }
                 }
             }
         }

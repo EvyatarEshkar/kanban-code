@@ -50,15 +50,33 @@ impl Default for GitHubSettings {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NotificationSettings {
+    #[serde(default = "default_true")]
+    pub notifications_enabled: bool,
     #[serde(default)]
     pub pushover_enabled: bool,
     pub pushover_token: Option<String>,
     pub pushover_user_key: Option<String>,
     #[serde(default)]
     pub render_markdown_image: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for NotificationSettings {
+    fn default() -> Self {
+        Self {
+            notifications_enabled: true,
+            pushover_enabled: false,
+            pushover_token: None,
+            pushover_user_key: None,
+            render_markdown_image: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
