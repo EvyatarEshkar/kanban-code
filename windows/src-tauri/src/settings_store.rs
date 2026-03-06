@@ -114,21 +114,8 @@ pub struct SettingsStore {
 
 impl SettingsStore {
     pub fn new(base_path: Option<PathBuf>) -> Self {
-        let base = base_path.unwrap_or_else(|| {
-            // On Windows use %APPDATA%\kanban-code, on others ~/.kanban-code
-            #[cfg(target_os = "windows")]
-            {
-                dirs::data_dir()
-                    .expect("no data dir")
-                    .join("kanban-code")
-            }
-            #[cfg(not(target_os = "windows"))]
-            {
-                dirs::home_dir()
-                    .expect("no home dir")
-                    .join(".kanban-code")
-            }
-        });
+        let base = base_path
+            .unwrap_or_else(|| crate::coordination_store::kanban_data_dir());
         Self {
             file_path: base.join("settings.json"),
         }

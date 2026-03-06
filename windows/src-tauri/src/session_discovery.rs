@@ -40,23 +40,85 @@ pub struct SessionDiscovery {
 
 impl SessionDiscovery {
     pub fn new(claude_dir: Option<PathBuf>) -> Self {
-        let dir = claude_dir.unwrap_or_else(|| {
-            // Windows: %APPDATA%\Claude\projects or fallback to ~/.claude/projects
-            #[cfg(target_os = "windows")]
-            {
-                let appdata = std::env::var("APPDATA").unwrap_or_default();
-                let win_path = PathBuf::from(&appdata).join("Claude").join("projects");
-                if win_path.exists() {
-                    return win_path;
-                }
-            }
-            dirs::home_dir()
-                .expect("no home dir")
-                .join(".claude")
-                .join("projects")
-        });
+        let dir = claude_dir.unwrap_or_else(|| resolve_claude_dir());
         Self { claude_dir: dir }
     }
+}
+
+/// Resolve the Claude projects directory, handling native Windows and WSL.
+///
+/// Priority order:
+///   1. Native Windows: %APPDATA%\Claude\projects
+///   2. WSL: /mnt/c/Users/<username>/AppData/Roaming/Claude/projects
+///   3. Linux/macOS fallback: ~/.claude/projects
+fn resolve_claude_dir() -> PathBuf {
+    // Native Windows
+    #[cfg(target_os = "windows")]
+    {
+        let appdata = std::env::var("APPDATA").unwrap_or_default();
+        let p = PathBuf::from(&appdata).join("Claude").join("projects");
+        if p.exists() {
+            return p;
+        }
+    }
+
+    // WSL detection: check /proc/version for "microsoft" (case-insensitive)
+    if is_wsl() {
+        // Determine the Windows username from /mnt/c/Users
+        if let Some(p) = wsl_claude_dir() {
+            if p.exists() {
+                return p;
+            }
+        }
+    }
+
+    // Fallback: ~/.claude/projects (Linux, macOS, plain WSL home)
+    dirs::home_dir()
+        .expect("no home dir")
+        .join(".claude")
+        .join("projects")
+}
+
+/// Returns true when running inside WSL (delegates to shell_command).
+fn is_wsl() -> bool {
+    crate::shell_command::is_wsl()
+}
+
+/// Find the Claude projects dir via the Windows AppData path mounted under /mnt/c.
+/// Tries each directory under /mnt/c/Users/ and returns the first match.
+fn wsl_claude_dir() -> Option<PathBuf> {
+    let users_dir = PathBuf::from("/mnt/c/Users");
+    if !users_dir.exists() {
+        return None;
+    }
+    // Try $USERPROFILE env var first (WSL often sets this)
+    if let Ok(profile) = std::env::var("USERPROFILE") {
+        let p = PathBuf::from(profile)
+            .join("AppData")
+            .join("Roaming")
+            .join("Claude")
+            .join("projects");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    // Scan /mnt/c/Users/<name>/AppData/Roaming/Claude/projects
+    let entries = std::fs::read_dir(&users_dir).ok()?;
+    for entry in entries.flatten() {
+        let candidate = entry
+            .path()
+            .join("AppData")
+            .join("Roaming")
+            .join("Claude")
+            .join("projects");
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+impl SessionDiscovery {
 
     pub async fn discover_sessions(&self) -> Result<Vec<Session>> {
         if !self.claude_dir.exists() {

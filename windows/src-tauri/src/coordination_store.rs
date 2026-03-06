@@ -166,6 +166,25 @@ struct LinksContainer {
     links: Vec<Link>,
 }
 
+// ── Platform-aware data dir ──────────────────────────────────────────────────
+
+/// Returns ~/.kanban-code on Linux/macOS and under WSL.
+/// On native Windows uses %APPDATA%\kanban-code.
+pub fn kanban_data_dir() -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        return dirs::data_dir()
+            .expect("no data dir")
+            .join("kanban-code");
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        dirs::home_dir()
+            .expect("no home dir")
+            .join(".kanban-code")
+    }
+}
+
 // ── CoordinationStore ────────────────────────────────────────────────────────
 
 pub struct CoordinationStore {
@@ -174,11 +193,7 @@ pub struct CoordinationStore {
 
 impl CoordinationStore {
     pub fn new(base_path: Option<PathBuf>) -> Self {
-        let base = base_path.unwrap_or_else(|| {
-            dirs::home_dir()
-                .expect("no home dir")
-                .join(".kanban-code")
-        });
+        let base = base_path.unwrap_or_else(|| kanban_data_dir());
         Self {
             file_path: base.join("links.json"),
         }
