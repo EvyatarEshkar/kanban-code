@@ -1029,11 +1029,19 @@ struct ContentView: View {
                 Button("Quit Kanban") {
                     showQuitConfirmation = false
                     if killTmuxOnQuit {
-                        for session in quitOwnedSessions {
-                            AppDelegate.killTmuxSessionSync(name: session.name)
+                        Task {
+                            // Kill tmux sessions and remove terminal associations from cards
+                            let killedNames = Set(quitOwnedSessions.map(\.name))
+                            for card in store.state.cards {
+                                if let tmux = card.link.tmuxLink, killedNames.contains(tmux.sessionName) {
+                                    await store.dispatchAndWait(.killTerminal(cardId: card.id, sessionName: tmux.sessionName))
+                                }
+                            }
+                            NSApp.reply(toApplicationShouldTerminate: true)
                         }
+                    } else {
+                        NSApp.reply(toApplicationShouldTerminate: true)
                     }
-                    NSApp.reply(toApplicationShouldTerminate: true)
                 }
                 .keyboardShortcut(.defaultAction)
             }

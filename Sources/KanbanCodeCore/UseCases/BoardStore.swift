@@ -1054,6 +1054,19 @@ public final class BoardStore: @unchecked Sendable {
         }
     }
 
+    /// Dispatch an action and wait for all its effects to complete.
+    public func dispatchAndWait(_ action: Action) async {
+        let effects = Reducer.reduce(state: &state, action: action)
+        await withTaskGroup(of: Void.self) { group in
+            for effect in effects {
+                group.addTask { [weak self] in
+                    guard let self else { return }
+                    await self.effectHandler.execute(effect, dispatch: self.dispatch)
+                }
+            }
+        }
+    }
+
     // MARK: - Activity Refresh (fast path)
 
     /// Lightweight activity-only refresh. Queries the activity detector for all
