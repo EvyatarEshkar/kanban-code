@@ -49,8 +49,31 @@ enum EditorDiscovery {
         }
     }
 
+    /// CLI names for editors — used to open the correct folder as project root.
+    /// NSWorkspace.open alone can't do this for already-running editors.
+    /// CLI commands and extra flags for editors.
+    private static let cliCommands: [String: (command: String, extraArgs: [String])] = [
+        "dev.zed.Zed": ("zed", ["-n"]),
+        "com.todesktop.230313mzl4w4u92": ("cursor", []),
+        "com.microsoft.VSCode": ("code", []),
+        "co.aspect.browser": ("windsurf", []),
+        "com.sublimetext.4": ("subl", []),
+        "com.sublimetext.3": ("subl", []),
+    ]
+
     /// Open a path in the editor with the given bundle ID.
     static func open(path: String, bundleId: String) {
+        // Try CLI first — the only reliable way to tell an already-running editor
+        // to open a specific directory as project root
+        if let entry = cliCommands[bundleId] {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = [entry.command] + entry.extraArgs + [path]
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            if (try? process.run()) != nil { return }
+        }
+        // Fallback to NSWorkspace
         let url = URL(fileURLWithPath: path)
         if let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) {
             NSWorkspace.shared.open(
