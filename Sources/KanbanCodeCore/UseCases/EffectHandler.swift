@@ -5,13 +5,16 @@ import Foundation
 public actor EffectHandler {
     private let coordinationStore: CoordinationStore
     private let tmuxAdapter: TmuxManagerPort?
+    private let setClipboardImage: (@Sendable (Data) -> Void)?
 
     public init(
         coordinationStore: CoordinationStore,
-        tmuxAdapter: TmuxManagerPort? = nil
+        tmuxAdapter: TmuxManagerPort? = nil,
+        setClipboardImage: (@Sendable (Data) -> Void)? = nil
     ) {
         self.coordinationStore = coordinationStore
         self.tmuxAdapter = tmuxAdapter
+        self.setClipboardImage = setClipboardImage
     }
 
     public func execute(_ effect: Effect, dispatch: @MainActor @Sendable (Action) -> Void) async {
@@ -91,6 +94,27 @@ public actor EffectHandler {
                 try await tmuxAdapter?.sendPrompt(to: sessionName, text: promptBody)
             } catch {
                 KanbanCodeLog.warn("effect", "sendPromptToTmux failed: \(error)")
+            }
+
+        case .sendPromptWithImagesToTmux(let sessionName, let promptBody, let imagePaths):
+            do {
+                guard let tmux = tmuxAdapter, let setClipboard = setClipboardImage else { return }
+                let images = imagePaths.compactMap { ImageAttachment.fromPath($0) }
+                if !images.isEmpty {
+                    let sender = ImageSender(tmux: tmux)
+                    try await sender.waitForReady(sessionName: sessionName)
+                    try await sender.sendImages(
+                        sessionName: sessionName,
+                        images: images,
+                        setClipboard: setClipboard
+                    )
+                }
+                try await tmux.sendPrompt(to: sessionName, text: promptBody)
+                for path in imagePaths {
+                    try? FileManager.default.removeItem(atPath: path)
+                }
+            } catch {
+                KanbanCodeLog.warn("effect", "sendPromptWithImagesToTmux failed: \(error)")
             }
         }
     }

@@ -189,31 +189,31 @@ public final class BackgroundOrchestrator: @unchecked Sendable {
                 // behave identically to claude-pushover's one-event-per-process model.
                 switch event.eventName {
                 case "Stop":
-                    // claude-pushover: sleep 1s, check if user prompted, send if not.
+                    // claude-pushover: sleep 0.5s, check if user prompted, send if not.
                     // NO 62s dedup — Stop always sends (dedup only applies to Notification events).
                     KanbanCodeLog.info("notify", "Stop event for session \(event.sessionId.prefix(8)) at \(event.timestamp)")
                     let stopTime = event.timestamp
                     let sessionId = event.sessionId
                     Task { [weak self] in
-                        try? await Task.sleep(for: .seconds(1))
+                        try? await Task.sleep(for: .milliseconds(500))
                         guard let self else {
                             KanbanCodeLog.info("notify", "Stop handler: self deallocated")
                             return
                         }
-                        // Check if user sent a prompt within 1s after this Stop
+                        // Check if user sent a prompt within 0.5s after this Stop
                         let prompted = await notificationDedup.hasPromptedWithin(
                             sessionId: sessionId, after: stopTime
                         )
                         if prompted {
-                            KanbanCodeLog.info("notify", "Stop skipped: user prompted within 1s after stop")
+                            KanbanCodeLog.info("notify", "Stop skipped: user prompted within 0.5s after stop")
                             return
                         }
                         // Send directly — no dedup for Stop events (matches claude-pushover)
                         await self.doNotify(sessionId: sessionId)
 
-                        // Auto-send queued prompt: wait 1 more second (2s total from Stop),
+                        // Auto-send queued prompt: wait 0.5 more seconds (1s total from Stop),
                         // re-check that user hasn't prompted, then send first auto prompt.
-                        try? await Task.sleep(for: .seconds(1))
+                        try? await Task.sleep(for: .milliseconds(500))
                         let promptedAgain = await notificationDedup.hasPromptedWithin(
                             sessionId: sessionId, after: stopTime
                         )

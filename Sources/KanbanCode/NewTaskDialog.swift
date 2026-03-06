@@ -8,10 +8,11 @@ struct NewTaskDialog: View {
     var globalRemoteSettings: RemoteSettings?
     /// (prompt, projectPath, title, startImmediately) — creates task, optionally starts via LaunchConfirmation
     var onCreate: (String, String?, String?, Bool) -> Void = { _, _, _, _ in }
-    /// (prompt, projectPath, title, createWorktree, runRemotely, skipPermissions, commandOverride) — creates and launches directly (skips LaunchConfirmation)
-    var onCreateAndLaunch: (String, String?, String?, Bool, Bool, Bool, String?) -> Void = { _, _, _, _, _, _, _ in }
+    /// (prompt, projectPath, title, createWorktree, runRemotely, skipPermissions, commandOverride, images) — creates and launches directly (skips LaunchConfirmation)
+    var onCreateAndLaunch: (String, String?, String?, Bool, Bool, Bool, String?, [ImageAttachment]) -> Void = { _, _, _, _, _, _, _, _ in }
 
     @State private var prompt = ""
+    @State private var images: [ImageAttachment] = []
     @State private var title = ""
     @State private var selectedProjectPath: String = ""
     @State private var customPath = ""
@@ -31,22 +32,12 @@ struct NewTaskDialog: View {
                 .fontWeight(.semibold)
 
             // Prompt
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Prompt")
-                    .font(.app(.caption))
-                    .foregroundStyle(.secondary)
-
-                PromptEditor(
-                    text: $prompt,
-                    placeholder: "Describe what you want Claude to do...",
-                    maxHeight: 400,
-                    onSubmit: submitForm
-                )
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(minHeight: 80, maxHeight: 400)
-                .padding(4)
-                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
-            }
+            PromptSection(
+                text: $prompt,
+                images: $images,
+                placeholder: "Describe what you want Claude to do...",
+                onSubmit: submitForm
+            )
 
             // Title (optional)
             TextField("Title (optional)", text: $title)
@@ -185,7 +176,8 @@ struct NewTaskDialog: View {
                 createWorktree && isGitRepo,
                 runRemotely && hasRemoteConfig,
                 dangerouslySkipPermissions,
-                commandEdited ? command : nil
+                commandEdited ? command : nil,
+                images
             )
         } else {
             onCreate(prompt, proj, titleOrNil, false)
@@ -236,14 +228,12 @@ struct NewTaskDialog: View {
         var cmd = "claude"
         if dangerouslySkipPermissions { cmd += " --dangerously-skip-permissions" }
 
-        let truncated = LaunchConfirmationDialog.truncatePrompt(prompt, maxLength: 60)
-        cmd += " '\(truncated)'"
-
         if createWorktree && isGitRepo {
             cmd += " --worktree"
         }
 
         parts.append(cmd)
+
         return parts.joined(separator: " \\\n  ")
     }
 }

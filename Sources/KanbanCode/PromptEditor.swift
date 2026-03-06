@@ -9,6 +9,7 @@ struct PromptEditor: NSViewRepresentable {
     var placeholder: String = ""
     var maxHeight: CGFloat = 400
     var onSubmit: () -> Void = {}
+    var onImagePaste: ((Data) -> Void)?
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -38,6 +39,7 @@ struct PromptEditor: NSViewRepresentable {
         textView.textContainer?.widthTracksTextView = true
         textView.delegate = context.coordinator
         textView.onSubmit = onSubmit
+        textView.onImagePaste = onImagePaste
 
         scrollView.documentView = textView
 
@@ -50,6 +52,7 @@ struct PromptEditor: NSViewRepresentable {
             textView.string = text
         }
         textView.onSubmit = onSubmit
+        textView.onImagePaste = onImagePaste
         textView.font = font
 
         // Update placeholder
@@ -126,6 +129,7 @@ final class PromptEditorScrollView: NSScrollView {
 /// NSTextView subclass that intercepts Return key for submit behavior.
 final class SubmitTextView: NSTextView {
     var onSubmit: () -> Void = {}
+    var onImagePaste: ((Data) -> Void)?
 
     override func keyDown(with event: NSEvent) {
         let isReturn = event.keyCode == 36 // Return key
@@ -144,5 +148,52 @@ final class SubmitTextView: NSTextView {
         }
 
         super.keyDown(with: event)
+    }
+
+    override func paste(_ sender: Any?) {
+        if tryPasteImage() { return }
+        super.paste(sender)
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        // Catch Cmd+V explicitly — in SwiftUI sheets the Edit menu may not dispatch paste: to us
+        if event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+           event.charactersIgnoringModifiers == "v" {
+            if tryPasteImage() { return true }
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    /// Try to extract an image from the clipboard. Returns true if an image was handled.
+    private func tryPasteImage() -> Bool {
+        guard let onImagePaste else { return false }
+        let pb = NSPasteboard.general
+
+        // Direct PNG data
+        if let pngData = pb.data(forType: .png) {
+            onImagePaste(pngData)
+            return true
+        }
+
+        // TIFF data (screenshots, most image copies) → convert to PNG
+        if let tiffData = pb.data(forType: .tiff),
+           let bitmap = NSBitmapImageRep(data: tiffData),
+           let pngData = bitmap.representation(using: .png, properties: [:]) {
+            onImagePaste(pngData)
+            return true
+        }
+
+        // File URL pointing to an image
+        if let urlData = pb.data(forType: .fileURL),
+           let url = URL(dataRepresentation: urlData, relativeTo: nil),
+           let image = NSImage(contentsOf: url),
+           let tiffData = image.tiffRepresentation,
+           let bitmap = NSBitmapImageRep(data: tiffData),
+           let pngData = bitmap.representation(using: .png, properties: [:]) {
+            onImagePaste(pngData)
+            return true
+        }
+
+        return false
     }
 }

@@ -489,11 +489,15 @@ struct CardDetailView: View {
             QueuedPromptDialog(
                 isPresented: $showQueuedPromptDialog,
                 existingPrompt: editingQueuedPrompt,
-                onSave: { body, sendAuto in
+                onSave: { body, sendAuto, images in
+                    let imagePaths: [String]? = images.isEmpty ? nil : images.compactMap { img in
+                        var mutable = img
+                        return try? mutable.saveToTemp()
+                    }
                     if let existing = editingQueuedPrompt {
                         onUpdateQueuedPrompt(existing.id, body, sendAuto)
                     } else {
-                        onAddQueuedPrompt(QueuedPrompt(body: body, sendAutomatically: sendAuto))
+                        onAddQueuedPrompt(QueuedPrompt(body: body, sendAutomatically: sendAuto, imagePaths: imagePaths))
                     }
                 }
             )

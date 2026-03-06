@@ -65,6 +65,7 @@ struct ContentView: View {
     @AppStorage("selectedProject") private var selectedProjectPersisted: String = ""
     private let settingsStore: SettingsStore
     private let launcher: LaunchSession
+    private let tmuxAdapter: TmuxAdapter
     private let systemTray = SystemTray()
     private let mutagenAdapter = MutagenAdapter()
     private let hookEventsPath: String
@@ -86,7 +87,11 @@ struct ContentView: View {
 
         let effectHandler = EffectHandler(
             coordinationStore: coordination,
-            tmuxAdapter: tmux
+            tmuxAdapter: tmux,
+            setClipboardImage: { data in
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setData(data, forType: .png)
+            }
         )
 
         let boardStore = BoardStore(
@@ -123,6 +128,7 @@ struct ContentView: View {
         _orchestrator = State(initialValue: orch)
         self.settingsStore = settings
         self.launcher = launch
+        self.tmuxAdapter = tmux
         self.hookEventsPath = (NSHomeDirectory() as NSString)
             .appendingPathComponent(".kanban-code/hook-events.jsonl")
         self.settingsFilePath = (NSHomeDirectory() as NSString)
@@ -349,8 +355,8 @@ struct ContentView: View {
                     onCreate: { prompt, projectPath, title, startImmediately in
                         createManualTask(prompt: prompt, projectPath: projectPath, title: title, startImmediately: startImmediately)
                     },
-                    onCreateAndLaunch: { prompt, projectPath, title, createWorktree, runRemotely, skipPermissions, commandOverride in
-                        createManualTaskAndLaunch(prompt: prompt, projectPath: projectPath, title: title, createWorktree: createWorktree, runRemotely: runRemotely, skipPermissions: skipPermissions, commandOverride: commandOverride)
+                    onCreateAndLaunch: { prompt, projectPath, title, createWorktree, runRemotely, skipPermissions, commandOverride, images in
+                        createManualTaskAndLaunch(prompt: prompt, projectPath: projectPath, title: title, createWorktree: createWorktree, runRemotely: runRemotely, skipPermissions: skipPermissions, commandOverride: commandOverride, images: images)
                     }
                 )
             }
@@ -373,12 +379,12 @@ struct ContentView: View {
                         get: { launchConfig != nil },
                         set: { if !$0 { launchConfig = nil } }
                     )
-                ) { editedPrompt, createWorktree, runRemotely, skipPermissions, commandOverride in
+                ) { editedPrompt, createWorktree, runRemotely, skipPermissions, commandOverride, images in
                     if config.isResume {
                         executeResume(cardId: config.cardId, runRemotely: runRemotely, skipPermissions: skipPermissions, commandOverride: commandOverride)
                     } else {
                         let wtName: String? = createWorktree ? (config.worktreeName ?? "") : nil
-                        executeLaunch(cardId: config.cardId, prompt: editedPrompt, projectPath: config.projectPath, worktreeName: wtName, runRemotely: runRemotely, skipPermissions: skipPermissions, commandOverride: commandOverride)
+                        executeLaunch(cardId: config.cardId, prompt: editedPrompt, projectPath: config.projectPath, worktreeName: wtName, runRemotely: runRemotely, skipPermissions: skipPermissions, commandOverride: commandOverride, images: images)
                     }
                 }
             }
@@ -1461,7 +1467,7 @@ struct ContentView: View {
         }
     }
 
-    private func createManualTaskAndLaunch(prompt: String, projectPath: String?, title: String? = nil, createWorktree: Bool, runRemotely: Bool, skipPermissions: Bool = true, commandOverride: String? = nil) {
+    private func createManualTaskAndLaunch(prompt: String, projectPath: String?, title: String? = nil, createWorktree: Bool, runRemotely: Bool, skipPermissions: Bool = true, commandOverride: String? = nil, images: [ImageAttachment] = []) {
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let name: String
         if let title, !title.isEmpty {
@@ -1488,7 +1494,7 @@ struct ContentView: View {
             let builtPrompt = PromptBuilder.buildPrompt(card: link, project: project, settings: settings)
 
             let wtName: String? = createWorktree ? "" : nil
-            executeLaunch(cardId: link.id, prompt: builtPrompt, projectPath: effectivePath, worktreeName: wtName, runRemotely: runRemotely, skipPermissions: skipPermissions, commandOverride: commandOverride)
+            executeLaunch(cardId: link.id, prompt: builtPrompt, projectPath: effectivePath, worktreeName: wtName, runRemotely: runRemotely, skipPermissions: skipPermissions, commandOverride: commandOverride, images: images)
         }
     }
 
@@ -1615,7 +1621,7 @@ struct ContentView: View {
         }
     }
 
-    private func executeLaunch(cardId: String, prompt: String, projectPath: String, worktreeName: String?, runRemotely: Bool = true, skipPermissions: Bool = true, commandOverride: String? = nil) {
+    private func executeLaunch(cardId: String, prompt: String, projectPath: String, worktreeName: String?, runRemotely: Bool = true, skipPermissions: Bool = true, commandOverride: String? = nil, images: [ImageAttachment] = []) {
         // IMMEDIATE state update via reducer — no more dual memory+disk writes
         store.dispatch(.launchCard(cardId: cardId, prompt: prompt, projectPath: projectPath, worktreeName: worktreeName, runRemotely: runRemotely, commandOverride: commandOverride))
         shouldFocusTerminal = true
@@ -1697,6 +1703,27 @@ struct ContentView: View {
                 // Show terminal immediately — clear isLaunching so UI switches
                 // from spinner to terminal view without waiting for session detection.
                 store.dispatch(.launchTmuxReady(cardId: cardId))
+
+                // Send images + prompt via send-keys after Claude is ready
+                if !prompt.isEmpty || !images.isEmpty {
+                    let imageSender = ImageSender(tmux: self.tmuxAdapter)
+                    try await imageSender.waitForReady(sessionName: tmuxName)
+
+                    if !images.isEmpty {
+                        try await imageSender.sendImages(
+                            sessionName: tmuxName,
+                            images: images,
+                            setClipboard: { data in
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setData(data, forType: .png)
+                            }
+                        )
+                    }
+
+                    if !prompt.isEmpty {
+                        try await self.tmuxAdapter.sendPrompt(to: tmuxName, text: prompt)
+                    }
+                }
 
                 // Detect new Claude session by polling for new .jsonl file
                 // Worktree launches need more attempts (git worktree + Claude startup)

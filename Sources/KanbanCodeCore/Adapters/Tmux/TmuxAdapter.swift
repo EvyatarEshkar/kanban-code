@@ -96,6 +96,23 @@ public final class TmuxAdapter: TmuxManagerPort, @unchecked Sendable {
         )
     }
 
+    public func capturePane(sessionName: String) async throws -> String {
+        let result = try await ShellCommand.run(
+            tmuxPath,
+            arguments: ["capture-pane", "-p", "-t", sessionName]
+        )
+        return result.stdout
+    }
+
+    public func sendBracketedPaste(to sessionName: String) async throws {
+        // Send empty bracketed paste: \e[200~ \e[201~
+        // Claude Code detects the paste event and checks the system clipboard for images.
+        let _ = try await ShellCommand.run(
+            tmuxPath,
+            arguments: ["send-keys", "-t", sessionName, "\u{1b}[200~\u{1b}[201~"]
+        )
+    }
+
     public func findSessionForWorktree(
         sessions: [TmuxSession],
         worktreePath: String,

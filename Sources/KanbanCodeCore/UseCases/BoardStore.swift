@@ -241,6 +241,7 @@ public enum Effect: Sendable {
     case updateSessionIndex(sessionId: String, name: String)
     case moveSessionFile(cardId: String, sessionId: String, oldPath: String, newProjectPath: String)
     case sendPromptToTmux(sessionName: String, promptBody: String)
+    case sendPromptWithImagesToTmux(sessionName: String, promptBody: String, imagePaths: [String])
 }
 
 // MARK: - Reducer
@@ -550,10 +551,13 @@ public enum Reducer {
             if link.queuedPrompts?.isEmpty == true { link.queuedPrompts = nil }
             link.updatedAt = .now
             state.links[cardId] = link
-            return [
-                .upsertLink(link),
-                .sendPromptToTmux(sessionName: sessionName, promptBody: prompt.body)
-            ]
+            let sendEffect: Effect
+            if let imagePaths = prompt.imagePaths, !imagePaths.isEmpty {
+                sendEffect = .sendPromptWithImagesToTmux(sessionName: sessionName, promptBody: prompt.body, imagePaths: imagePaths)
+            } else {
+                sendEffect = .sendPromptToTmux(sessionName: sessionName, promptBody: prompt.body)
+            }
+            return [.upsertLink(link), sendEffect]
 
         case .moveCardToProject(let cardId, let projectPath):
             guard var link = state.links[cardId] else { return [] }

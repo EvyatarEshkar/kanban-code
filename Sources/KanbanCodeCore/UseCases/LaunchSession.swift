@@ -26,11 +26,9 @@ public final class LaunchSession: SessionLauncher, @unchecked Sendable {
             // User provided a custom command — use it as-is
             cmd = commandOverride
         } else {
-            // Build the claude command
-            // Prompt must come before --worktree so it's not mistaken for the worktree name
+            // Build the claude command (prompt is sent via send-keys after Claude is ready)
             var built = "claude"
             if skipPermissions { built += " --dangerously-skip-permissions" }
-            built += " \(shellEscape(prompt))"
             if let worktreeName {
                 if worktreeName.isEmpty {
                     built += " --worktree"

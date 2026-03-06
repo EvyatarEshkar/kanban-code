@@ -109,11 +109,13 @@ public struct QueuedPrompt: Codable, Sendable, Equatable, Identifiable {
     public let id: String
     public var body: String
     public var sendAutomatically: Bool
+    public var imagePaths: [String]?
 
-    public init(id: String = KSUID.generate(prefix: "prompt"), body: String, sendAutomatically: Bool = true) {
+    public init(id: String = KSUID.generate(prefix: "prompt"), body: String, sendAutomatically: Bool = true, imagePaths: [String]? = nil) {
         self.id = id
         self.body = body
         self.sendAutomatically = sendAutomatically
+        self.imagePaths = imagePaths
     }
 }
 

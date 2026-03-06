@@ -15,9 +15,10 @@ struct LaunchConfirmationDialog: View {
     let isResume: Bool
     let sessionId: String?
     @Binding var isPresented: Bool
-    var onLaunch: (String, Bool, Bool, Bool, String?) -> Void = { _, _, _, _, _ in } // (editedPrompt, createWorktree, runRemotely, skipPermissions, commandOverride)
+    var onLaunch: (String, Bool, Bool, Bool, String?, [ImageAttachment]) -> Void = { _, _, _, _, _, _ in } // (editedPrompt, createWorktree, runRemotely, skipPermissions, commandOverride, images)
 
     @State private var prompt: String
+    @State private var images: [ImageAttachment] = []
     @State private var command: String = ""
     @State private var commandEdited: Bool = false
     @AppStorage("createWorktree") private var createWorktree = true
@@ -36,7 +37,7 @@ struct LaunchConfirmationDialog: View {
         isResume: Bool = false,
         sessionId: String? = nil,
         isPresented: Binding<Bool>,
-        onLaunch: @escaping (String, Bool, Bool, Bool, String?) -> Void = { _, _, _, _, _ in }
+        onLaunch: @escaping (String, Bool, Bool, Bool, String?, [ImageAttachment]) -> Void = { _, _, _, _, _, _ in }
     ) {
         self.cardId = cardId
         self.projectPath = projectPath
@@ -99,21 +100,12 @@ struct LaunchConfirmationDialog: View {
 
                     // Editable prompt (launch only)
                     if !isResume {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Prompt")
-                                .font(.app(.caption))
-                                .foregroundStyle(.secondary)
-
-                            PromptEditor(
-                                text: $prompt,
-                                maxHeight: 400,
-                                onSubmit: submitForm
-                            )
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(minHeight: 120, maxHeight: 400)
-                            .padding(4)
-                            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
-                        }
+                        PromptSection(
+                            text: $prompt,
+                            images: $images,
+                            minHeight: 120,
+                            onSubmit: submitForm
+                        )
                     }
 
                     // Checkboxes
@@ -208,7 +200,7 @@ struct LaunchConfirmationDialog: View {
             guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         }
         let override = commandEdited ? command : nil
-        onLaunch(prompt, effectiveCreateWorktree, effectiveRunRemotely, dangerouslySkipPermissions, override)
+        onLaunch(prompt, effectiveCreateWorktree, effectiveRunRemotely, dangerouslySkipPermissions, override, images)
         isPresented = false
     }
 
@@ -237,9 +229,6 @@ struct LaunchConfirmationDialog: View {
         } else {
             var cmd = "claude"
             if dangerouslySkipPermissions { cmd += " --dangerously-skip-permissions" }
-
-            let truncated = Self.truncatePrompt(prompt, maxLength: 60)
-            cmd += " '\(truncated)'"
 
             if effectiveCreateWorktree {
                 if let name = worktreeName, !name.isEmpty {
