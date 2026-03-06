@@ -224,28 +224,25 @@ pub async fn open_in_editor(path: &str, editor: Option<&str>) -> Result<()> {
 
     #[cfg(target_os = "windows")]
     {
-        // Build a list of editor commands to try, with full paths for known editors
+        // Build a list of editor .cmd paths to try
+        // On Windows, .cmd files must be run via `cmd /c "<path>" args...`
         let localappdata = std::env::var("LOCALAPPDATA").unwrap_or_default();
         let cursor_full = format!(r"{}\Programs\cursor\resources\app\bin\cursor.cmd", localappdata);
         let code_full = format!(r"{}\Programs\Microsoft VS Code\bin\code.cmd", localappdata);
 
-        let mut editors_to_try: Vec<String> = Vec::new();
-        if editor_cmd != "code" && editor_cmd != "cursor" {
-            editors_to_try.push(editor_cmd.to_string());
-        }
-        editors_to_try.push(cursor_full);
-        editors_to_try.push("cursor".to_string());
-        editors_to_try.push(code_full);
-        editors_to_try.push("code".to_string());
+        let editors_to_try = [
+            cursor_full.as_str(),
+            code_full.as_str(),
+        ];
 
         let is_wsl_path = path.starts_with("\\\\wsl") || path.contains("\\wsl$\\") || path.contains("\\wsl.localhost\\");
 
         if is_wsl_path {
             let linux_path = unc_to_linux_path(path);
             for ed in &editors_to_try {
-                // Editors like Cursor/VS Code handle WSL paths via: cursor --remote wsl+Ubuntu <path>
-                let result = tokio::process::Command::new(ed)
-                    .args(["--remote", "wsl+Ubuntu", &linux_path])
+                // .cmd files must be invoked through cmd.exe
+                let result = tokio::process::Command::new("cmd")
+                    .args(["/c", ed, "--remote", "wsl+Ubuntu", &linux_path])
                     .spawn();
                 if result.is_ok() {
                     return Ok(());
@@ -253,9 +250,13 @@ pub async fn open_in_editor(path: &str, editor: Option<&str>) -> Result<()> {
             }
         }
 
-        // Non-WSL path or WSL editors failed: try plain open
+        // Non-WSL path or WSL remote failed: try plain open
         for ed in &editors_to_try {
-            if tokio::process::Command::new(ed).arg(path).spawn().is_ok() {
+            if tokio::process::Command::new("cmd")
+                .args(["/c", ed, path])
+                .spawn()
+                .is_ok()
+            {
                 return Ok(());
             }
         }
