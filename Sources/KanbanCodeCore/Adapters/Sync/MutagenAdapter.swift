@@ -50,15 +50,21 @@ public final class MutagenAdapter: SyncManagerPort, @unchecked Sendable {
         }
     }
 
-    /// Reset a stuck or errored sync session.
+    /// Reset a stuck or errored sync session by pausing then resuming.
     public func resetSync(name: String) async throws {
-        try await stopSync(name: name)
+        let selector = "--label-selector"
+        let labelFilter = "\(label)=true"
+        _ = try await ShellCommand.run(mutagenPath, arguments: ["sync", "pause", selector, labelFilter])
+        let result = try await ShellCommand.run(mutagenPath, arguments: ["sync", "resume", selector, labelFilter])
+        if !result.succeeded {
+            throw MutagenError.resetFailed(message: result.stderr)
+        }
     }
 
     public func stopSync(name: String) async throws {
         let result = try await ShellCommand.run(
             mutagenPath,
-            arguments: ["sync", "terminate", "--name", name]
+            arguments: ["sync", "terminate", "--label-selector", "\(label)=true"]
         )
         if !result.succeeded {
             throw MutagenError.terminateFailed(name: name, message: result.stderr)
@@ -136,12 +142,14 @@ public final class MutagenAdapter: SyncManagerPort, @unchecked Sendable {
 public enum MutagenError: Error, LocalizedError {
     case createFailed(name: String, message: String)
     case terminateFailed(name: String, message: String)
+    case resetFailed(message: String)
     case flushFailed(message: String)
 
     public var errorDescription: String? {
         switch self {
         case .createFailed(let name, let msg): "Failed to create sync '\(name)': \(msg)"
         case .terminateFailed(let name, let msg): "Failed to terminate sync '\(name)': \(msg)"
+        case .resetFailed(let msg): "Failed to reset sync: \(msg)"
         case .flushFailed(let msg): "Failed to flush sync: \(msg)"
         }
     }

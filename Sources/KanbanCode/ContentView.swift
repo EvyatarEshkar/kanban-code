@@ -333,6 +333,9 @@ struct ContentView: View {
                         store.dispatch(.setBusy(cardId: card.id, busy: false))
                     }
                 },
+                onUpdatePrompt: { body, imagePaths in
+                    store.dispatch(.updatePrompt(cardId: card.id, body: body, imagePaths: imagePaths))
+                },
                 availableProjects: projectList,
                 onMoveToProject: { projectPath in
                     let name = projectList.first(where: { $0.path == projectPath })?.name ?? (projectPath as NSString).lastPathComponent
@@ -417,8 +420,8 @@ struct ContentView: View {
                     projects: store.state.configuredProjects,
                     defaultProjectPath: store.state.selectedProjectPath,
                     globalRemoteSettings: store.state.globalRemoteSettings,
-                    onCreate: { prompt, projectPath, title, startImmediately in
-                        createManualTask(prompt: prompt, projectPath: projectPath, title: title, startImmediately: startImmediately)
+                    onCreate: { prompt, projectPath, title, startImmediately, images in
+                        createManualTask(prompt: prompt, projectPath: projectPath, title: title, startImmediately: startImmediately, images: images)
                     },
                     onCreateAndLaunch: { prompt, projectPath, title, createWorktree, runRemotely, skipPermissions, commandOverride, images in
                         createManualTaskAndLaunch(prompt: prompt, projectPath: projectPath, title: title, createWorktree: createWorktree, runRemotely: runRemotely, skipPermissions: skipPermissions, commandOverride: commandOverride, images: images)
@@ -1207,6 +1210,7 @@ struct ContentView: View {
             HStack {
                 Button {
                     Task {
+                        isSyncRefreshing = true
                         try? await mutagenAdapter.flushSync()
                         await refreshSyncStatus()
                     }
@@ -1215,10 +1219,12 @@ struct ContentView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .disabled(isSyncRefreshing)
 
                 if currentSyncStatus == .error || currentSyncStatus == .paused {
                     Button {
                         Task {
+                            isSyncRefreshing = true
                             for name in syncStatuses.keys {
                                 try? await mutagenAdapter.resetSync(name: name)
                             }
@@ -1229,11 +1235,13 @@ struct ContentView: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    .disabled(isSyncRefreshing)
                 }
 
                 if !syncStatuses.isEmpty {
                     Button {
                         Task {
+                            isSyncRefreshing = true
                             for name in syncStatuses.keys {
                                 try? await mutagenAdapter.stopSync(name: name)
                             }
@@ -1244,6 +1252,7 @@ struct ContentView: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    .disabled(isSyncRefreshing)
                 }
 
                 Spacer()
@@ -1564,7 +1573,7 @@ struct ContentView: View {
         presentNewTask()
     }
 
-    private func createManualTask(prompt: String, projectPath: String?, title: String? = nil, startImmediately: Bool = false) {
+    private func createManualTask(prompt: String, projectPath: String?, title: String? = nil, startImmediately: Bool = false, images: [ImageAttachment] = []) {
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let name: String
         if let title, !title.isEmpty {
@@ -1573,12 +1582,17 @@ struct ContentView: View {
             let firstLine = trimmed.components(separatedBy: .newlines).first ?? trimmed
             name = String(firstLine.prefix(100))
         }
+        let imagePaths: [String]? = images.isEmpty ? nil : images.compactMap { img in
+            var mutable = img
+            return try? mutable.saveToPersistent()
+        }
         let link = Link(
             name: name,
             projectPath: projectPath,
             column: startImmediately ? .inProgress : .backlog,
             source: .manual,
-            promptBody: trimmed
+            promptBody: trimmed,
+            promptImagePaths: imagePaths
         )
 
         store.dispatch(.createManualTask(link))
@@ -1598,12 +1612,17 @@ struct ContentView: View {
             let firstLine = trimmed.components(separatedBy: .newlines).first ?? trimmed
             name = String(firstLine.prefix(100))
         }
+        let imagePaths: [String]? = images.isEmpty ? nil : images.compactMap { img in
+            var mutable = img
+            return try? mutable.saveToPersistent()
+        }
         let link = Link(
             name: name,
             projectPath: projectPath,
             column: .inProgress,
             source: .manual,
-            promptBody: trimmed
+            promptBody: trimmed,
+            promptImagePaths: imagePaths
         )
         let effectivePath = projectPath ?? NSHomeDirectory()
 
