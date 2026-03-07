@@ -18,6 +18,7 @@ struct NewTaskDialog: View {
     @State private var customPath = ""
     @State private var command = ""
     @State private var commandEdited = false
+    @State private var worktreeBranch = ""
     @AppStorage("startTaskImmediately") private var startImmediately = true
     @AppStorage("createWorktree") private var createWorktree = true
     @State private var runRemotely = true
@@ -81,6 +82,17 @@ struct NewTaskDialog: View {
                             .font(.app(.caption2))
                             .foregroundStyle(.secondary)
                             .padding(.leading, 20)
+                    }
+                    if createWorktree && isGitRepo {
+                        HStack {
+                            Text("Branch name")
+                                .font(.app(.callout))
+                                .foregroundStyle(.secondary)
+                            TextField("", text: $worktreeBranch, prompt: Text("Leave empty for a random name"))
+                                .textFieldStyle(.roundedBorder)
+                                .font(.app(.callout))
+                        }
+                        .padding(.leading, 20)
                     }
 
                     Toggle("Run remotely", isOn: hasRemoteConfig ? $runRemotely : .constant(false))
@@ -156,6 +168,9 @@ struct NewTaskDialog: View {
             if !commandEdited { command = commandPreview }
         }
         .onChange(of: createWorktree) {
+            if !commandEdited { command = commandPreview }
+        }
+        .onChange(of: worktreeBranch) {
             if !commandEdited { command = commandPreview }
         }
         .onChange(of: runRemotely) {
@@ -243,7 +258,12 @@ struct NewTaskDialog: View {
         if dangerouslySkipPermissions { cmd += " --dangerously-skip-permissions" }
 
         if createWorktree && isGitRepo {
-            cmd += " --worktree"
+            let branch = worktreeBranch.trimmingCharacters(in: .whitespacesAndNewlines)
+            if branch.isEmpty {
+                cmd += " --worktree"
+            } else {
+                cmd += " --worktree \(branch)"
+            }
         }
 
         parts.append(cmd)

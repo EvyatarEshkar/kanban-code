@@ -126,10 +126,15 @@ struct LaunchConfirmationDialog: View {
                                     .padding(.leading, 20)
                             }
                             if createWorktree && isGitRepo {
-                                TextField("Branch name", text: $worktreeBranch, prompt: Text("Leave empty for a random one"))
-                                    .textFieldStyle(.roundedBorder)
-                                    .font(.app(.callout))
-                                    .padding(.leading, 20)
+                                HStack {
+                                    Text("Branch name")
+                                        .font(.app(.callout))
+                                        .foregroundStyle(.secondary)
+                                    TextField("", text: $worktreeBranch, prompt: Text("Leave empty for a random name"))
+                                        .textFieldStyle(.roundedBorder)
+                                        .font(.app(.callout))
+                                }
+                                .padding(.leading, 20)
                             }
                         }
 

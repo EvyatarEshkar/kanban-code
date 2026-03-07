@@ -121,8 +121,7 @@ struct CardDetailView: View {
     @State private var knownTerminalCount: Int = 0
     @State private var terminalGrabFocus: Bool = false
     @State private var suppressTerminalFocus: Bool = false
-    @State private var renamingSession: String?
-    @State private var tabRenameText: String = ""
+    @State private var tabRenameItem: TabRenameItem?
 
     /// Launch lock older than 30s is stale — stop showing spinner, show terminal instead
     private var isLaunchStale: Bool {
@@ -530,6 +529,18 @@ struct CardDetailView: View {
                 }
             )
         }
+        .sheet(item: $tabRenameItem) { item in
+            RenameTerminalTabDialog(
+                currentName: item.currentName,
+                isPresented: Binding(
+                    get: { tabRenameItem != nil },
+                    set: { if !$0 { tabRenameItem = nil } }
+                ),
+                onRename: { newName in
+                    onRenameTerminal(item.sessionName, newName)
+                }
+            )
+        }
         .alert("Fork Session?", isPresented: $showForkConfirm) {
             Button("Cancel", role: .cancel) {}
             if card.link.worktreeLink != nil {
@@ -863,19 +874,9 @@ struct CardDetailView: View {
                 HStack(spacing: 4) {
                     Image(systemName: "terminal")
                         .font(.app(.caption2))
-                    if renamingSession == sessionName {
-                        TextField("Name", text: $tabRenameText, onCommit: {
-                            onRenameTerminal(sessionName, tabRenameText)
-                            renamingSession = nil
-                        })
+                    Text(displayName)
                         .font(.app(.caption))
-                        .textFieldStyle(.plain)
-                        .frame(width: 60)
-                    } else {
-                        Text(displayName)
-                            .font(.app(.caption))
-                            .lineLimit(1)
-                    }
+                        .lineLimit(1)
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
@@ -906,8 +907,7 @@ struct CardDetailView: View {
         )
         .contextMenu {
             Button("Rename") {
-                tabRenameText = customName ?? ""
-                renamingSession = sessionName
+                tabRenameItem = TabRenameItem(sessionName: sessionName, currentName: customName ?? displayName)
             }
         }
     }
@@ -1848,6 +1848,56 @@ struct RenameSessionDialog: View {
                 .fontWeight(.semibold)
 
             TextField("Session name", text: $name)
+                .textFieldStyle(.roundedBorder)
+
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    isPresented = false
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Button("Rename") {
+                    let trimmed = name.trimmingCharacters(in: .whitespaces)
+                    if !trimmed.isEmpty {
+                        onRename(trimmed)
+                    }
+                    isPresented = false
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(20)
+        .frame(width: 350)
+        .onAppear {
+            name = currentName
+        }
+    }
+}
+
+/// Rename dialog for terminal tabs.
+private struct TabRenameItem: Identifiable {
+    let id = UUID()
+    let sessionName: String
+    let currentName: String
+}
+
+struct RenameTerminalTabDialog: View {
+    let currentName: String
+    @Binding var isPresented: Bool
+    var onRename: (String) -> Void = { _ in }
+
+    @State private var name = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Rename Terminal Tab")
+                .font(.app(.title3))
+                .fontWeight(.semibold)
+
+            TextField("Tab name", text: $name)
                 .textFieldStyle(.roundedBorder)
 
             HStack {
