@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.1.18](https://github.com/langwatch/kanban-code/compare/v0.1.17...v0.1.18) (2026-03-07)
+
+
+### Features
+
+* improve manual task prompt UX and image support ([23346ff](https://github.com/langwatch/kanban-code/commit/23346ff0c1f7e5a191edea2f27b0cd90691f09f9))
+* open new task from lane double click ([596074f](https://github.com/langwatch/kanban-code/commit/596074f0648ddbb0fb073851e82b1c1694ebae1d))
+* open new task from lane double click ([096033d](https://github.com/langwatch/kanban-code/commit/096033dadc2b63f8729f8ce52f98822f1113ce07))
+
+
+### Bug Fixes
+
+* add label selector to mutagen sync flush calls ([3653f66](https://github.com/langwatch/kanban-code/commit/3653f663c59c0a5489b125b485ee3645590e6852))
+* add Start button and auto-create sync from remote shell ([293eaa9](https://github.com/langwatch/kanban-code/commit/293eaa994ac343fa2ad95669a6dd8f8a451b9adf))
+* mutagen stop/reset/flush commands were silently failing ([fb5d3dc](https://github.com/langwatch/kanban-code/commit/fb5d3dcba753bf9d412b1cadc326d129ee32c0b1))
+* stop ignoring VCS in mutagen sync ([e8855f9](https://github.com/langwatch/kanban-code/commit/e8855f9de4587902d1d184225088e50a9e25d28a))
+* sync popover auto-resizes when content changes ([fd1f9ab](https://github.com/langwatch/kanban-code/commit/fd1f9abdcf96151a4e450ac975d597d7a3ad3454))
+* sync popover text area uses fixed height ([892f89c](https://github.com/langwatch/kanban-code/commit/892f89ce56224931b26ece72429518af37b00159))
+* sync status button padding, title case, adaptive polling ([85ff9b7](https://github.com/langwatch/kanban-code/commit/85ff9b73b47bd2a66cc163b0b3f3311acd470f24))
+* sync status icon now reflects actual mutagen state ([f254988](https://github.com/langwatch/kanban-code/commit/f254988fc105f28c149ee18a019af31f57e7f2cd))
+* toolbar padding and sync status polish ([ad942b4](https://github.com/langwatch/kanban-code/commit/ad942b496074ff9c55c14d5b78d3d58ae92ab1c6))
+
 ## [0.1.17](https://github.com/langwatch/kanban-code/compare/v0.1.16...v0.1.17) (2026-03-06)
 
 
