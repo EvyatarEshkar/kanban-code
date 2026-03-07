@@ -45,6 +45,7 @@ struct DroppableColumnView: View {
     var onMoveToProject: (String, String) -> Void = { _, _ in }   // (cardId, projectPath)
     var onRefreshBacklog: (() -> Void)?
     var onCardClicked: (String) -> Void = { _ in }
+    var onColumnBackgroundClick: (KanbanCodeColumn) -> Void = { _ in }
 
     @State private var isTargeted = false
     @State private var renamingCardId: String?
@@ -225,9 +226,25 @@ struct DroppableColumnView: View {
             onMergeCards: onMergeCards,
             onReorderCard: onReorderCard
         ))
+        .simultaneousGesture(
+            SpatialTapGesture(count: 2).onEnded { value in
+                handleBackgroundTap(at: value.location)
+            }
+        )
         .animation(.easeInOut(duration: 0.15), value: isTargeted)
         .animation(.easeInOut(duration: 0.15), value: dragState.mergeTargetId)
         .animation(.easeInOut(duration: 0.15), value: dragState.reorderTargetId)
+    }
+
+    private func handleBackgroundTap(at location: CGPoint) {
+        guard column.allowsBoardTaskCreation else { return }
+        guard dragState.draggingCard == nil else { return }
+        guard location.y >= 56 else { return }
+
+        let tappedCard = cardFrames.values.contains { $0.contains(location) }
+        guard !tappedCard else { return }
+
+        onColumnBackgroundClick(column)
     }
 }
 

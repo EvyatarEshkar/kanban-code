@@ -187,11 +187,14 @@ struct ContentView: View {
             onMergeCards: { sourceId, targetId in
                 store.dispatch(.mergeCards(sourceId: sourceId, targetId: targetId))
             },
-            onNewTask: { showNewTask = true },
+            onNewTask: { presentNewTask() },
             onCardClicked: { cardId in
                 if store.state.cards.first(where: { $0.id == cardId })?.link.tmuxLink != nil {
                     shouldFocusTerminal = true
                 }
+            },
+            onColumnBackgroundClick: { column in
+                handleColumnBackgroundClick(column)
             }
         )
     }
@@ -606,7 +609,7 @@ struct ContentView: View {
                 showSearch.toggle()
             }
             .onReceive(NotificationCenter.default.publisher(for: .kanbanCodeNewTask)) { _ in
-                showNewTask = true
+                presentNewTask()
             }
             .onReceive(NotificationCenter.default.publisher(for: .kanbanCodeHookEvent)) { _ in
                 Task {
@@ -670,7 +673,7 @@ struct ContentView: View {
         boardWithHandlers
             .toolbar {
                 ToolbarItemGroup(placement: .navigation) {
-                    Button { showNewTask = true } label: {
+                    Button { presentNewTask() } label: {
                         Image(systemName: "square.and.pencil")
                     }
                     .help("New task (⌘N)")
@@ -1448,6 +1451,15 @@ struct ContentView: View {
         case .light: NSApp.appearance = NSAppearance(named: .aqua)
         case .dark: NSApp.appearance = NSAppearance(named: .darkAqua)
         }
+    }
+
+    private func presentNewTask() {
+        showNewTask = true
+    }
+
+    private func handleColumnBackgroundClick(_ column: KanbanCodeColumn) {
+        guard column.allowsBoardTaskCreation else { return }
+        presentNewTask()
     }
 
     private func createManualTask(prompt: String, projectPath: String?, title: String? = nil, startImmediately: Bool = false) {

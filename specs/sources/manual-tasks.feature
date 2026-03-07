@@ -19,6 +19,14 @@ Feature: Manual Task Creation
     And the prompt field placeholder should say "Describe what you want Claude to do..."
     And the title field defaults to empty (first line of prompt used as card name)
 
+  Scenario: Double-clicking a working lane background opens the task creation form
+    When I double-click the empty background of the "Waiting" lane
+    Then the same task creation form should appear as if I clicked "+" or pressed ⌘N
+
+  Scenario: Double-clicking All Sessions does not open task creation
+    When I double-click the empty background of the "All Sessions" lane
+    Then the task creation form should not appear
+
   Scenario: Title field overrides auto-derived name
     When I enter title "Auth Refactor" and prompt "Refactor the auth module..."
     Then the card name should be "Auth Refactor"
@@ -79,6 +87,11 @@ Feature: Manual Task Creation
     And no tmux session should be created
     And the card should have no sessionLink, tmuxLink, or worktreeLink
     And I can start it later by clicking the Start button
+
+  Scenario: Lane double-click uses the same creation defaults as New Task
+    Given I opened the task creation form by double-clicking the empty background of the "In Review" lane
+    When I uncheck "Start immediately" and create a task
+    Then the card should appear in Backlog with label "TASK"
 
   # ── Card Structure ──
 

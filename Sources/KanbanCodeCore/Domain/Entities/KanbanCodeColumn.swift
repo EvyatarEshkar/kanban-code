@@ -19,4 +19,8 @@ public enum KanbanCodeColumn: String, Codable, CaseIterable, Sendable {
         case .allSessions: "All Sessions"
         }
     }
+
+    public var allowsBoardTaskCreation: Bool {
+        self != .allSessions
+    }
 }

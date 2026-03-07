@@ -73,6 +73,16 @@ struct EntityTests {
         #expect(KanbanCodeColumn.allSessions.displayName == "All Sessions")
     }
 
+    @Test("KanbanCodeColumn allows board task creation only in working lanes")
+    func columnBoardTaskCreationEligibility() {
+        #expect(KanbanCodeColumn.backlog.allowsBoardTaskCreation)
+        #expect(KanbanCodeColumn.inProgress.allowsBoardTaskCreation)
+        #expect(KanbanCodeColumn.waiting.allowsBoardTaskCreation)
+        #expect(KanbanCodeColumn.inReview.allowsBoardTaskCreation)
+        #expect(KanbanCodeColumn.done.allowsBoardTaskCreation)
+        #expect(!KanbanCodeColumn.allSessions.allowsBoardTaskCreation)
+    }
+
     @Test("Worktree directoryName extracts last component")
     func worktreeDirectoryName() {
         let wt = Worktree(path: "/Users/rchaves/Projects/repo/.claude/worktrees/feat-login", branch: "feat/login")
