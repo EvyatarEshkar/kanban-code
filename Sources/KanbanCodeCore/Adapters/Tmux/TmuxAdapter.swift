@@ -96,6 +96,27 @@ public final class TmuxAdapter: TmuxManagerPort, @unchecked Sendable {
         )
     }
 
+    public func pastePrompt(to sessionName: String, text: String) async throws {
+        // Use load-buffer + paste-buffer -p to bypass readline special char handling.
+        // The -p flag wraps the paste in bracketed paste codes (\e[200~ … \e[201~),
+        // telling the application (Gemini CLI) to treat the text literally and not
+        // interpret special characters like ? (help) or ! (shell escape).
+        let tempFile = "/tmp/kanban-code-paste-\(ProcessInfo.processInfo.processIdentifier).txt"
+        try text.write(toFile: tempFile, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(atPath: tempFile) }
+
+        let _ = try await ShellCommand.run(
+            tmuxPath, arguments: ["load-buffer", tempFile]
+        )
+        let _ = try await ShellCommand.run(
+            tmuxPath, arguments: ["paste-buffer", "-p", "-t", sessionName]
+        )
+        // Press Enter to submit
+        let _ = try await ShellCommand.run(
+            tmuxPath, arguments: ["send-keys", "-t", sessionName, "Enter"]
+        )
+    }
+
     public func capturePane(sessionName: String) async throws -> String {
         let result = try await ShellCommand.run(
             tmuxPath,

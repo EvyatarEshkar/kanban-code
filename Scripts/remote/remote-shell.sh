@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Remote shell wrapper for Claude Code.
 # Intercepts shell commands and runs them on a remote host via SSH.
 # Designed to be used as $SHELL override: SHELL=/path/to/remote-shell.sh claude

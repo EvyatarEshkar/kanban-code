@@ -117,7 +117,13 @@ public final class LaunchSession: SessionLauncher, @unchecked Sendable {
         // Sort for deterministic output
         for key in extraEnv.keys.sorted() {
             if let value = extraEnv[key] {
-                parts.append("\(key)=\(shellEscape(value))")
+                if value.contains("$") {
+                    // Use double quotes so shell variables like $PATH get expanded
+                    let escaped = value.replacingOccurrences(of: "\"", with: "\\\"")
+                    parts.append("\(key)=\"\(escaped)\"")
+                } else {
+                    parts.append("\(key)=\(shellEscape(value))")
+                }
             }
         }
 
