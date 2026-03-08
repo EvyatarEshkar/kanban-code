@@ -47,9 +47,12 @@ public struct AppState: Sendable {
 
     // MARK: - Derived
 
-    /// All cards, built from links + sessions + activity.
-    public var cards: [KanbanCodeCard] {
-        links.values.map { link in
+    /// Cached cards array — rebuilt by BoardStore after each dispatch.
+    public internal(set) var cards: [KanbanCodeCard] = []
+
+    /// Rebuild the cached cards array from current state.
+    mutating func rebuildCards() {
+        cards = links.values.map { link in
             let session = link.sessionLink.flatMap { sessions[$0.sessionId] }
             let activity = link.sessionLink.flatMap { activityMap[$0.sessionId] }
             let rateLimited = link.projectPath.map { rateLimitedRepos.contains($0) } ?? false
@@ -1138,6 +1141,8 @@ public final class BoardStore: @unchecked Sendable {
     private var lastGHLookup: ContinuousClock.Instant = .now - .seconds(600)
     private var ghRateLimitedUntil: ContinuousClock.Instant = .now
     public var appIsActive: Bool = true
+    /// Cached worktree results by repo root, with directory mtime for invalidation
+    private var worktreeCache: [String: (mtime: Date?, worktrees: [Worktree])] = [:]
     private let discovery: SessionDiscovery
     private let coordinationStore: CoordinationStore
     private let activityDetector: (any ActivityDetector)?
@@ -1174,6 +1179,7 @@ public final class BoardStore: @unchecked Sendable {
     /// Dispatch an action. Reducer runs synchronously, effects run async.
     public func dispatch(_ action: Action) {
         let effects = Reducer.reduce(state: &state, action: action)
+        state.rebuildCards()
         for effect in effects {
             Task { [weak self] in
                 guard let self else { return }
@@ -1209,6 +1215,7 @@ public final class BoardStore: @unchecked Sendable {
     /// Dispatch an action and wait for all its effects to complete.
     public func dispatchAndWait(_ action: Action) async {
         let effects = Reducer.reduce(state: &state, action: action)
+        state.rebuildCards()
         await withTaskGroup(of: Void.self) { group in
             for effect in effects {
                 group.addTask { [weak self] in
@@ -1257,6 +1264,7 @@ public final class BoardStore: @unchecked Sendable {
                 for link in cached {
                     state.links[link.id] = link
                 }
+                state.rebuildCards()
             }
         }
     }
@@ -1278,9 +1286,18 @@ public final class BoardStore: @unchecked Sendable {
 
         do {
             // Use in-memory settings (loaded at startup, updated via .settingsLoaded action)
-            let configuredProjects = state.configuredProjects
-            let excludedPaths = state.excludedPaths
-            let globalRemoteSettings = state.globalRemoteSettings
+            // Fall back to reading from disk if settings haven't been loaded yet
+            var configuredProjects = state.configuredProjects
+            var excludedPaths = state.excludedPaths
+            var globalRemoteSettings = state.globalRemoteSettings
+            if configuredProjects.isEmpty, let store = settingsStore {
+                if let settings = try? await store.read() {
+                    configuredProjects = settings.projects
+                    excludedPaths = settings.globalView.excludedPaths
+                    globalRemoteSettings = settings.remote
+                    dispatch(.settingsLoaded(projects: configuredProjects, excludedPaths: excludedPaths, remote: globalRemoteSettings))
+                }
+            }
 
             // Show cached data immediately while discovery runs
             if state.links.isEmpty {
@@ -1305,30 +1322,52 @@ public final class BoardStore: @unchecked Sendable {
             // Deduplicate repo roots — multiple projects can share the same repo
             let uniqueRepoRoots = Set(configuredProjects.map(\.effectiveRepoRoot))
 
-            // Scan worktrees once per unique repo (parallel)
+            // Scan worktrees once per unique repo (parallel, with mtime caching)
             var worktreesByRepo: [String: [Worktree]] = [:]
             if let worktreeAdapter {
                 let t = ContinuousClock.now
-                let results = await withTaskGroup(of: (String, [Worktree])?.self) { group in
-                    for repoRoot in uniqueRepoRoots {
-                        group.addTask {
-                            guard let worktrees = try? await worktreeAdapter.listWorktrees(repoRoot: repoRoot) else {
-                                return nil
+                let fm = FileManager.default
+
+                // Check which repos need re-scanning by checking .git/worktrees dir mtime
+                var reposToScan: [String] = []
+                for repoRoot in uniqueRepoRoots {
+                    let worktreesDir = (repoRoot as NSString).appendingPathComponent(".git/worktrees")
+                    let mtime = (try? fm.attributesOfItem(atPath: worktreesDir))?[.modificationDate] as? Date
+                    if let cached = worktreeCache[repoRoot], cached.mtime == mtime {
+                        worktreesByRepo[repoRoot] = cached.worktrees
+                    } else {
+                        reposToScan.append(repoRoot)
+                    }
+                }
+
+                if !reposToScan.isEmpty {
+                    let results = await withTaskGroup(of: (String, [Worktree])?.self) { group in
+                        for repoRoot in reposToScan {
+                            group.addTask {
+                                guard let worktrees = try? await worktreeAdapter.listWorktrees(repoRoot: repoRoot) else {
+                                    return nil
+                                }
+                                return (repoRoot, worktrees)
                             }
-                            return (repoRoot, worktrees)
                         }
+                        var collected: [(String, [Worktree])] = []
+                        for await result in group {
+                            if let result { collected.append(result) }
+                        }
+                        return collected
                     }
-                    var collected: [(String, [Worktree])] = []
-                    for await result in group {
-                        if let result { collected.append(result) }
+                    for (repo, worktrees) in results {
+                        let worktreesDir = (repo as NSString).appendingPathComponent(".git/worktrees")
+                        let mtime = (try? fm.attributesOfItem(atPath: worktreesDir))?[.modificationDate] as? Date
+                        worktreeCache[repo] = (mtime: mtime, worktrees: worktrees)
+                        worktreesByRepo[repo] = worktrees
                     }
-                    return collected
                 }
-                for (repo, worktrees) in results {
-                    worktreesByRepo[repo] = worktrees
-                }
+                // Evict repos no longer configured
+                worktreeCache = worktreeCache.filter { uniqueRepoRoots.contains($0.key) }
+
                 let total = worktreesByRepo.values.flatMap { $0 }.count
-                KanbanCodeLog.info("reconcile", "worktrees: \(t.duration(to: .now)) (\(total) across \(uniqueRepoRoots.count) repos)")
+                KanbanCodeLog.info("reconcile", "worktrees: \(t.duration(to: .now)) (\(total) across \(uniqueRepoRoots.count) repos, \(reposToScan.count) scanned)")
             }
 
             // Incremental branch scan for watermarked cards.

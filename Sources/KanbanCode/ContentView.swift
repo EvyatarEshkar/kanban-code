@@ -2145,29 +2145,40 @@ struct ContentView: View {
         }
     }
 
-    /// Extract worktreeLink from a newly-created session file by reading its first line for gitBranch.
+    /// Extract worktreeLink from a newly-created session file by reading its first line for gitBranch and cwd.
     private static func extractWorktreeLink(sessionPath: String, projectPath: String) -> WorktreeLink? {
-        // Derive worktree path from the session's directory encoding
-        // Session dir: ~/.claude/projects/<encodedProject>-.claude-worktrees-<name>/
-        // Worktree path: <projectPath>/.claude/worktrees/<name>
-        let sessionDir = (sessionPath as NSString).deletingLastPathComponent
-        let dirName = (sessionDir as NSString).lastPathComponent
-        let encodedProject = projectPath.replacingOccurrences(of: "/", with: "-")
+        // Read metadata from the first line of the .jsonl — it has the actual cwd and gitBranch
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: sessionPath)),
+              let firstNewline = data.firstIndex(of: UInt8(ascii: "\n")),
+              let firstLine = String(data: data[data.startIndex..<firstNewline], encoding: .utf8),
+              let lineData = firstLine.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else {
+            return nil
+        }
 
-        guard dirName.hasPrefix(encodedProject + "-") else { return nil }
-        let suffix = String(dirName.dropFirst(encodedProject.count + 1))
-        // suffix is like ".claude-worktrees-<name>", decode path separators
-        let worktreeSubpath = suffix.replacingOccurrences(of: "-", with: "/")
-        let worktreePath = (projectPath as NSString).appendingPathComponent(worktreeSubpath)
+        // Use the cwd from the session metadata — it has the exact worktree path
+        // (avoids lossy decoding of the directory name which mangles dashes in worktree names)
+        let worktreePath: String
+        if let cwd = obj["cwd"] as? String,
+           cwd.contains("/.claude/worktrees/") || cwd.contains("/.claude-worktrees/") {
+            worktreePath = cwd
+        } else {
+            // Fallback: derive from directory name structure
+            // suffix is like ".claude-worktrees-<name>" or "claude-worktrees-<name>"
+            let sessionDir = (sessionPath as NSString).deletingLastPathComponent
+            let dirName = (sessionDir as NSString).lastPathComponent
+            let encodedProject = projectPath.replacingOccurrences(of: "/", with: "-")
+            guard dirName.hasPrefix(encodedProject) else { return nil }
+            let rest = String(dirName.dropFirst(encodedProject.count))
+            // Match known pattern: [-.]claude-worktrees-<worktreeName>
+            // Only convert the structural separators, keep worktree name dashes intact
+            guard let wtRange = rest.range(of: "claude-worktrees-") else { return nil }
+            let worktreeName = String(rest[wtRange.upperBound...])
+            worktreePath = projectPath + "/.claude/worktrees/" + worktreeName
+        }
 
-        // Try to read gitBranch from the first line of the .jsonl
         var branchName: String?
-        if let data = try? Data(contentsOf: URL(fileURLWithPath: sessionPath)),
-           let firstNewline = data.firstIndex(of: UInt8(ascii: "\n")),
-           let firstLine = String(data: data[data.startIndex..<firstNewline], encoding: .utf8),
-           let lineData = firstLine.data(using: .utf8),
-           let obj = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
-           let branch = obj["gitBranch"] as? String {
+        if let branch = obj["gitBranch"] as? String {
             branchName = branch.replacingOccurrences(of: "refs/heads/", with: "")
         }
 
@@ -2175,7 +2186,7 @@ struct ContentView: View {
         if branchName == nil {
             let components = worktreePath.components(separatedBy: "/.claude/worktrees/")
             if components.count == 2 {
-                branchName = components[1].components(separatedBy: "/").first
+                branchName = components[1]
             }
         }
 
@@ -2397,7 +2408,12 @@ struct ContentView: View {
         guard let card = store.state.cards.first(where: { $0.id == cardId }) else { return }
         let sessionId = card.link.sessionLink?.sessionId ?? card.link.id
         // For worktree cards, cd into the worktree — that's where Claude stored the session data.
-        let projectPath = card.link.worktreeLink?.path ?? card.link.projectPath ?? NSHomeDirectory()
+        let projectPath: String
+        if let worktreePath = card.link.worktreeLink?.path, !worktreePath.isEmpty {
+            projectPath = worktreePath
+        } else {
+            projectPath = card.link.projectPath ?? NSHomeDirectory()
+        }
 
         let globalRemote = store.state.globalRemoteSettings
         let projectIsUnderRemote = globalRemote.map { projectPath.hasPrefix($0.localPath) } ?? false
@@ -2477,7 +2493,12 @@ struct ContentView: View {
         guard let card = store.state.cards.first(where: { $0.id == cardId }) else { return }
         let sessionId = card.link.sessionLink?.sessionId ?? card.link.id
         // For worktree cards, cd into the worktree — that's where Claude stored the session data.
-        let projectPath = card.link.worktreeLink?.path ?? card.link.projectPath ?? NSHomeDirectory()
+        let projectPath: String
+        if let worktreePath = card.link.worktreeLink?.path, !worktreePath.isEmpty {
+            projectPath = worktreePath
+        } else {
+            projectPath = card.link.projectPath ?? NSHomeDirectory()
+        }
 
         // If the session file lives under a different project key (e.g. a cleaned-up worktree),
         // move it to the current projectPath so `claude --resume` can find it.
