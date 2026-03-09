@@ -29,6 +29,8 @@ struct SessionHistoryView: View {
     var onLoadAroundTurn: ((Int) -> Void)?
     var sessionPath: String?
 
+    @AppStorage("sessionDetailFontSize") private var sessionDetailFontSize: Double = 12
+
     @State private var hoveredTurnIndex: Int?
     @State private var isCmdHeld = false
     @State private var cmdMonitor: Any?
@@ -227,7 +229,7 @@ struct SessionHistoryView: View {
 
             TextField("Search history...", text: $searchText, prompt: Text("Search history...").foregroundStyle(.white.opacity(0.3)))
                 .textFieldStyle(.plain)
-                .font(.app(.caption, design: .monospaced))
+                .font(.sessionDetail())
                 .foregroundStyle(.white)
                 .focused($isSearchFieldFocused)
                 .onKeyPress(.escape) { dismissSearch(); return .handled }
@@ -449,6 +451,8 @@ struct TurnBlockView: View {
     var isCmdHeld: Bool = false
     var assistant: CodingAssistant = .claude
 
+    @AppStorage("sessionDetailFontSize") private var sessionDetailFontSize: Double = 12
+
 
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
@@ -515,15 +519,14 @@ struct TurnBlockView: View {
                         HStack(alignment: .top, spacing: 0) {
                             if i == 0 {
                                 Text("\(assistant.historyPromptSymbol) ")
-                                    .font(.app(.caption, design: .monospaced))
+                                    .font(.sessionDetail(weight: .bold))
                                     .foregroundStyle(.green)
-                                    .fontWeight(.bold)
                             } else {
                                 Text("  ")
-                                    .font(.app(.caption, design: .monospaced))
+                                    .font(.sessionDetail())
                             }
                             styledText(textBlocks[i].text, color: .white, linksActive: linksActive)
-                                .font(.app(.caption, design: .monospaced))
+                                .font(.sessionDetail())
                                 .textSelection(.enabled)
                         }
                     }
@@ -536,11 +539,10 @@ struct TurnBlockView: View {
                 LinkableLine(isCmdHeld: isCmdHeld) { linksActive in
                     HStack(alignment: .top, spacing: 0) {
                         Text("\(assistant.historyPromptSymbol) ")
-                            .font(.app(.caption, design: .monospaced))
+                            .font(.sessionDetail(weight: .bold))
                             .foregroundStyle(.green)
-                            .fontWeight(.bold)
                         styledText(turn.textPreview, color: .white, linksActive: linksActive)
-                            .font(.app(.caption, design: .monospaced))
+                            .font(.sessionDetail())
                             .textSelection(.enabled)
                     }
                 }
@@ -557,10 +559,10 @@ struct TurnBlockView: View {
                 LinkableLine(isCmdHeld: isCmdHeld) { linksActive in
                     HStack(alignment: .top, spacing: 0) {
                         Text("● ")
-                            .font(.app(.caption, design: .monospaced))
+                            .font(.sessionDetail())
                             .foregroundStyle(.white)
                         styledText(turn.textPreview, color: Color(white: 0.85), linksActive: linksActive)
-                            .font(.app(.caption, design: .monospaced))
+                            .font(.sessionDetail())
                             .textSelection(.enabled)
                             .lineLimit(20)
                     }
@@ -645,14 +647,14 @@ struct TurnBlockView: View {
             HStack(alignment: .top, spacing: 0) {
                 if isFirst {
                     Text("● ")
-                        .font(.app(.caption, design: .monospaced))
+                        .font(.sessionDetail())
                         .foregroundStyle(.white)
                 } else {
                     Text("  ")
-                        .font(.app(.caption, design: .monospaced))
+                        .font(.sessionDetail())
                 }
                 styledText(trimmed, color: Color(white: 0.85), linksActive: linksActive)
-                    .font(.app(.caption, design: .monospaced))
+                    .font(.sessionDetail())
                     .textSelection(.enabled)
                     .lineLimit(30)
             }
@@ -665,14 +667,14 @@ struct TurnBlockView: View {
         LinkableLine(isCmdHeld: isCmdHeld) { linksActive in
             HStack(alignment: .top, spacing: 0) {
                 Text("  ● ")
-                    .font(.app(.caption, design: .monospaced))
+                    .font(.sessionDetail())
                     .foregroundStyle(.green)
                 styledText(name, color: .green.opacity(0.8), linksActive: linksActive)
-                    .font(.app(.caption, design: .monospaced))
+                    .font(.sessionDetail())
                 if displayText != name {
                     let args = displayText.hasPrefix(name) ? String(displayText.dropFirst(name.count)) : "(\(displayText))"
                     styledText(args, color: Color(white: 0.5), linksActive: linksActive)
-                        .font(.app(.caption, design: .monospaced))
+                        .font(.sessionDetail())
                         .lineLimit(2)
                 }
             }
@@ -685,10 +687,10 @@ struct TurnBlockView: View {
         LinkableLine(isCmdHeld: isCmdHeld) { linksActive in
             HStack(alignment: .top, spacing: 0) {
                 Text("  ⎿ ")
-                    .font(.app(.caption, design: .monospaced))
+                    .font(.sessionDetail())
                     .foregroundStyle(Color(white: 0.35))
                 styledText(block.text, color: Color(white: 0.35), linksActive: linksActive)
-                    .font(.app(.caption, design: .monospaced))
+                    .font(.sessionDetail())
                     .lineLimit(3)
             }
         }
@@ -699,10 +701,10 @@ struct TurnBlockView: View {
     private func thinkingLine(_ text: String) -> some View {
         HStack(alignment: .top, spacing: 0) {
             Text("  ∴ ")
-                .font(.app(.caption, design: .monospaced))
+                .font(.sessionDetail())
                 .foregroundStyle(Color(white: 0.3))
             Text("Thinking...")
-                .font(.app(.caption2, design: .monospaced))
+                .font(.sessionDetail())
                 .foregroundStyle(Color(white: 0.3))
                 .italic()
         }

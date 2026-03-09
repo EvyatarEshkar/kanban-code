@@ -248,7 +248,7 @@ struct GeneralSettingsView: View {
 
     @AppStorage("preferredEditorBundleId") private var editorBundleId: String = "dev.zed.Zed"
     @AppStorage("uiTextSize") private var uiTextSize: Int = 1
-    @AppStorage("terminalFontSize") private var terminalFontSize: Double = Double(TerminalCache.defaultFontSize)
+    @AppStorage("sessionDetailFontSize") private var sessionDetailFontSize: Double = Double(TerminalCache.defaultFontSize)
     @State private var installedEditors: [EditorDiscovery.Editor] = []
     @State private var showOnboarding = false
     @State private var mergeCommand: String = GitHubSettings.defaultMergeCommand
@@ -281,12 +281,12 @@ struct GeneralSettingsView: View {
                 }
 
                 HStack {
-                    Text("Terminal font size")
+                    Text("Session details monospace font size")
                     Spacer()
-                    Text("\(Int(terminalFontSize)) pt")
+                    Text("\(Int(sessionDetailFontSize)) pt")
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
-                    Stepper("", value: $terminalFontSize, in: 8...24, step: 1)
+                    Stepper("", value: $sessionDetailFontSize, in: 8...24, step: 1)
                         .labelsHidden()
                 }
 
@@ -297,10 +297,10 @@ struct GeneralSettingsView: View {
                     Spacer()
                     Button("Reset to Defaults") {
                         uiTextSize = 1
-                        terminalFontSize = Double(TerminalCache.defaultFontSize)
+                        sessionDetailFontSize = Double(TerminalCache.defaultFontSize)
                     }
                     .controlSize(.small)
-                    .disabled(uiTextSize == 1 && terminalFontSize == Double(TerminalCache.defaultFontSize))
+                    .disabled(uiTextSize == 1 && sessionDetailFontSize == Double(TerminalCache.defaultFontSize))
                 }
             }
 

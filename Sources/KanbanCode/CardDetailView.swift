@@ -93,6 +93,7 @@ struct CardDetailView: View {
     @Binding var isDroppingImage: Bool
 
     @AppStorage("preferredEditorBundleId") private var editorBundleId: String = "dev.zed.Zed"
+    @AppStorage("sessionDetailFontSize") private var sessionDetailFontSize: Double = 12
 
     @State private var turns: [ConversationTurn] = []
     @State private var isLoadingHistory = false
@@ -1042,7 +1043,7 @@ struct CardDetailView: View {
 
                 if let body = card.link.promptBody {
                     Text(body)
-                        .font(.app(.callout).monospaced())
+                        .font(.sessionDetail())
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }

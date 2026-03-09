@@ -58,7 +58,7 @@ struct KanbanCodeApp: App {
         }
     }
 
-    /// Adjust both UI text size and terminal font size together.
+    /// Adjust both UI text size and session detail font size together.
     private static func adjustZoom(by delta: Int) {
         let currentUI = UserDefaults.standard.object(forKey: "uiTextSize") != nil
             ? UserDefaults.standard.integer(forKey: "uiTextSize") : 1

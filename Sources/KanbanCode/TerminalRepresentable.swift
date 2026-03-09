@@ -233,7 +233,7 @@ final class BatchedTerminalView: LocalProcessTerminalView {
 final class TerminalCache {
     static let shared = TerminalCache()
     static let defaultFontSize: CGFloat = 12
-    static let fontSizeKey = "terminalFontSize"
+    static let fontSizeKey = "sessionDetailFontSize"
 
     private var terminals: [String: BatchedTerminalView] = [:]
     private var shiftEnterMonitor: Any?

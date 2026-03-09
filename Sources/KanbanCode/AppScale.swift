@@ -16,6 +16,17 @@ enum AppScale {
     }
 }
 
+// MARK: - Session detail font (used for terminal, history, and prompt panes)
+
+extension Font {
+    /// Monospaced font sized to the user's session detail font size setting.
+    static func sessionDetail(weight: Weight = .regular) -> Font {
+        let stored = UserDefaults.standard.double(forKey: "sessionDetailFontSize")
+        let size = stored > 0 ? stored : 12.0
+        return .system(size: CGFloat(size), weight: weight, design: .monospaced)
+    }
+}
+
 // MARK: - Scaled fonts
 
 extension Font {
