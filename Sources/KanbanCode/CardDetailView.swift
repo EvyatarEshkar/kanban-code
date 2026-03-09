@@ -1645,6 +1645,8 @@ struct CardDetailView: View {
     private func loadHistory() async {
         guard let path = card.link.sessionLink?.sessionPath ?? card.session?.jsonlPath else { return }
         if turns.isEmpty { isLoadingHistory = true }
+        // Preserve expanded window: if user loaded more than pageSize, keep that many
+        let loadCount = max(Self.pageSize, turns.count)
         do {
             if card.link.effectiveAssistant == .gemini {
                 // Gemini uses JSON format — load all turns via session store
@@ -1652,11 +1654,20 @@ struct CardDetailView: View {
                 turns = allTurns
                 hasMoreTurns = false
             } else {
-                // Claude uses JSONL — paginated loading
-                let loadCount = max(Self.pageSize, turns.count)
+                // Claude uses JSONL — paginated loading with stable incremental reload
                 let result = try await TranscriptReader.readTail(from: path, maxTurns: loadCount)
-                turns = result.turns
-                hasMoreTurns = result.hasMore
+                if turns.isEmpty {
+                    // Initial load — use the full result
+                    turns = result.turns
+                    hasMoreTurns = result.hasMore
+                } else {
+                    // Live reload — only append new turns so existing views stay stable
+                    let lastLineNumber = turns.last?.lineNumber ?? 0
+                    let newTurns = result.turns.filter { $0.lineNumber > lastLineNumber }
+                    if !newTurns.isEmpty {
+                        turns.append(contentsOf: newTurns)
+                    }
+                }
             }
         } catch {
             // Silently fail — empty history is fine
