@@ -42,6 +42,9 @@ public enum TranscriptReader {
                   let type = obj["type"] as? String,
                   type == "user" || type == "assistant" else { continue }
 
+            // Skip caveat wrapper messages entirely
+            if type == "user" && JsonlParser.isCaveatMessage(obj) { continue }
+
             totalTurnCount += 1
             turnLineInfos.append((lineNumber, line))
             // Keep only the last maxTurns entries in the ring
@@ -60,15 +63,18 @@ public enum TranscriptReader {
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let type = obj["type"] as? String else { continue }
 
+            // Stdout responses display as assistant-style turns
+            let role = (type == "user" && JsonlParser.isLocalCommandStdout(obj)) ? "assistant" : type
+
             let blocks: [ContentBlock]
             let textPreview: String
 
             if type == "user" {
                 blocks = extractUserBlocks(from: obj)
-                textPreview = Self.buildTextPreview(blocks: blocks, role: type)
+                textPreview = Self.buildTextPreview(blocks: blocks, role: role)
             } else {
                 blocks = extractAssistantBlocks(from: obj)
-                textPreview = Self.buildTextPreview(blocks: blocks, role: type)
+                textPreview = Self.buildTextPreview(blocks: blocks, role: role)
             }
 
             let timestamp = obj["timestamp"] as? String
@@ -76,7 +82,7 @@ public enum TranscriptReader {
             turns.append(ConversationTurn(
                 index: startIndex + i,
                 lineNumber: info.lineNumber,
-                role: type,
+                role: role,
                 textPreview: textPreview,
                 timestamp: timestamp,
                 contentBlocks: blocks
@@ -117,15 +123,21 @@ public enum TranscriptReader {
                               let type = obj["type"] as? String,
                               type == "user" || type == "assistant" else { continue }
 
+                        // Skip caveat wrapper messages entirely
+                        if type == "user" && JsonlParser.isCaveatMessage(obj) { continue }
+
+                        // Stdout responses display as assistant-style turns
+                        let role = (type == "user" && JsonlParser.isLocalCommandStdout(obj)) ? "assistant" : type
+
                         let blocks: [ContentBlock]
                         let textPreview: String
 
                         if type == "user" {
                             blocks = extractUserBlocks(from: obj)
-                            textPreview = buildTextPreview(blocks: blocks, role: type)
+                            textPreview = buildTextPreview(blocks: blocks, role: role)
                         } else {
                             blocks = extractAssistantBlocks(from: obj)
-                            textPreview = buildTextPreview(blocks: blocks, role: type)
+                            textPreview = buildTextPreview(blocks: blocks, role: role)
                         }
 
                         let timestamp = obj["timestamp"] as? String
@@ -133,7 +145,7 @@ public enum TranscriptReader {
                         continuation.yield(ConversationTurn(
                             index: turnIndex,
                             lineNumber: lineNumber,
-                            role: type,
+                            role: role,
                             textPreview: textPreview,
                             timestamp: timestamp,
                             contentBlocks: blocks
@@ -179,6 +191,12 @@ public enum TranscriptReader {
                               let type = obj["type"] as? String,
                               type == "user" || type == "assistant" else { continue }
 
+                        // Skip caveat wrapper messages entirely
+                        if type == "user" && JsonlParser.isCaveatMessage(obj) { continue }
+
+                        // Stdout responses display as assistant-style turns
+                        let role = (type == "user" && JsonlParser.isLocalCommandStdout(obj)) ? "assistant" : type
+
                         // Extract content the same way the reader/frontend does
                         let blocks: [ContentBlock]
                         if type == "user" {
@@ -186,7 +204,7 @@ public enum TranscriptReader {
                         } else {
                             blocks = extractAssistantBlocks(from: obj)
                         }
-                        let textPreview = buildTextPreview(blocks: blocks, role: type)
+                        let textPreview = buildTextPreview(blocks: blocks, role: role)
 
                         // Match against the same fields TurnBlockView.isSearchMatch checks
                         if textPreview.lowercased().contains(queryLower)
@@ -223,6 +241,12 @@ public enum TranscriptReader {
                   let type = obj["type"] as? String,
                   type == "user" || type == "assistant" else { continue }
 
+            // Skip caveat wrapper messages entirely
+            if type == "user" && JsonlParser.isCaveatMessage(obj) { continue }
+
+            // Stdout responses display as assistant-style turns
+            let role = (type == "user" && JsonlParser.isLocalCommandStdout(obj)) ? "assistant" : type
+
             defer { turnIndex += 1 }
 
             // Skip turns outside our range
@@ -236,10 +260,10 @@ public enum TranscriptReader {
 
             if type == "user" {
                 blocks = extractUserBlocks(from: obj)
-                textPreview = Self.buildTextPreview(blocks: blocks, role: type)
+                textPreview = Self.buildTextPreview(blocks: blocks, role: role)
             } else {
                 blocks = extractAssistantBlocks(from: obj)
-                textPreview = Self.buildTextPreview(blocks: blocks, role: type)
+                textPreview = Self.buildTextPreview(blocks: blocks, role: role)
             }
 
             let timestamp = obj["timestamp"] as? String
@@ -247,7 +271,7 @@ public enum TranscriptReader {
             turns.append(ConversationTurn(
                 index: turnIndex,
                 lineNumber: lineNumber,
-                role: type,
+                role: role,
                 textPreview: textPreview,
                 timestamp: timestamp,
                 contentBlocks: blocks
@@ -260,9 +284,26 @@ public enum TranscriptReader {
     // MARK: - User message parsing
 
     static func extractUserBlocks(from obj: [String: Any]) -> [ContentBlock] {
+        // Hide caveat wrapper messages entirely
+        if JsonlParser.isCaveatMessage(obj) { return [] }
+
         // User text can be at top level or inside message.content
         if let text = JsonlParser.extractTextContent(from: obj) {
-            return [ContentBlock(kind: .text, text: text)]
+            // Show slash commands cleanly (e.g. "/clear")
+            if let command = JsonlParser.parseLocalCommand(text) {
+                return [ContentBlock(kind: .text, text: command)]
+            }
+            // Show command stdout as plain text
+            if let stdout = JsonlParser.parseLocalCommandStdout(text) {
+                return [ContentBlock(kind: .text, text: stdout)]
+            }
+            // Strip any remaining metadata tags from mixed-content messages
+            let cleaned = JsonlParser.stripMetadataTags(text)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !cleaned.isEmpty {
+                return [ContentBlock(kind: .text, text: cleaned)]
+            }
+            return []
         }
 
         // Check for tool_result blocks in message.content

@@ -108,4 +108,80 @@ struct JsonlParserTests {
         let decoded = JsonlParser.decodeDirectoryName("-home-ubuntu-Projects")
         #expect(decoded == "/home/ubuntu/Projects")
     }
+
+    // MARK: - Metadata filtering
+
+    @Test("Skips isMeta caveat messages for first prompt")
+    func skipsCaveatForPrompt() async throws {
+        let dir = try makeTempDir()
+        defer { cleanup(dir) }
+
+        let path = try writeJsonl(dir, "meta-1.jsonl", [
+            #"{"type":"user","isMeta":true,"sessionId":"m1","message":{"content":"<local-command-caveat>wrapped</local-command-caveat>"},"cwd":"/test"}"#,
+            #"{"type":"user","sessionId":"m1","message":{"content":"The real prompt"},"cwd":"/test"}"#,
+            #"{"type":"assistant","sessionId":"m1","message":{"content":[{"type":"text","text":"OK"}]}}"#,
+        ])
+
+        let metadata = try await JsonlParser.extractMetadata(from: path)
+        #expect(metadata?.firstPrompt == "The real prompt")
+    }
+
+    @Test("Skips command-name messages for first prompt")
+    func skipsCommandForPrompt() async throws {
+        let dir = try makeTempDir()
+        defer { cleanup(dir) }
+
+        let path = try writeJsonl(dir, "meta-2.jsonl", [
+            #"{"type":"user","sessionId":"m2","message":{"content":"<command-name>/clear</command-name><command-message></command-message><command-args></command-args>"},"cwd":"/test"}"#,
+            #"{"type":"user","sessionId":"m2","message":{"content":"Fix the bug"},"cwd":"/test"}"#,
+            #"{"type":"assistant","sessionId":"m2","message":{"content":[{"type":"text","text":"OK"}]}}"#,
+        ])
+
+        let metadata = try await JsonlParser.extractMetadata(from: path)
+        #expect(metadata?.firstPrompt == "Fix the bug")
+    }
+
+    @Test("Skips local-command-stdout messages for first prompt")
+    func skipsStdoutForPrompt() async throws {
+        let dir = try makeTempDir()
+        defer { cleanup(dir) }
+
+        let path = try writeJsonl(dir, "meta-3.jsonl", [
+            #"{"type":"user","sessionId":"m3","message":{"content":"<local-command-stdout>some output</local-command-stdout>"},"cwd":"/test"}"#,
+            #"{"type":"user","sessionId":"m3","message":{"content":"Do something"},"cwd":"/test"}"#,
+        ])
+
+        let metadata = try await JsonlParser.extractMetadata(from: path)
+        #expect(metadata?.firstPrompt == "Do something")
+    }
+
+    @Test("stripMetadataTags removes known tags")
+    func stripTags() {
+        let text = "<command-name>/clear</command-name><command-message>msg</command-message>real text"
+        let stripped = JsonlParser.stripMetadataTags(text)
+        #expect(stripped == "real text")
+    }
+
+    @Test("parseLocalCommand extracts command name")
+    func parseCommand() {
+        let text = "<command-name>/clear</command-name><command-message></command-message><command-args></command-args>"
+        let command = JsonlParser.parseLocalCommand(text)
+        #expect(command == "/clear")
+    }
+
+    @Test("parseLocalCommandStdout extracts output")
+    func parseStdout() {
+        let text = "<local-command-stdout>hello world</local-command-stdout>"
+        let stdout = JsonlParser.parseLocalCommandStdout(text)
+        #expect(stdout == "hello world")
+    }
+
+    @Test("isCaveatMessage detects isMeta flag")
+    func caveatDetection() {
+        let caveat: [String: Any] = ["type": "user", "isMeta": true, "message": ["content": "test"]]
+        #expect(JsonlParser.isCaveatMessage(caveat) == true)
+
+        let normal: [String: Any] = ["type": "user", "message": ["content": "test"]]
+        #expect(JsonlParser.isCaveatMessage(normal) == false)
+    }
 }

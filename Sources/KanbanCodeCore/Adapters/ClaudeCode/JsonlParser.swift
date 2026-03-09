@@ -69,10 +69,14 @@ public enum JsonlParser {
                 metadata.messageCount += 1
             }
 
-            // Extract first user message
+            // Extract first user message (skip metadata injected by Claude Code)
             if type == "user" && !foundFirstUserMessage {
+                if isMetadataMessage(obj) { continue }
                 foundFirstUserMessage = true
-                metadata.firstPrompt = extractTextContent(from: obj)
+                if let text = extractTextContent(from: obj) {
+                    metadata.firstPrompt = stripMetadataTags(text)
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                }
             }
 
             // Stop early — we only need first prompt + enough messages to confirm non-empty
@@ -287,6 +291,66 @@ public enum JsonlParser {
             return String(path[path.startIndex..<range.lowerBound])
         }
         return path
+    }
+
+    // MARK: - Metadata message detection
+
+    /// Known metadata XML tag names injected by Claude Code.
+    private static let metadataTagNames = [
+        "local-command-caveat",
+        "command-name",
+        "command-message",
+        "command-args",
+        "local-command-stdout",
+    ]
+
+    /// Regex matching any known metadata XML tag pair (greedy within each pair).
+    private nonisolated(unsafe) static let metadataTagRegex: Regex<(Substring, Substring)> = {
+        let tagPattern = metadataTagNames.joined(separator: "|")
+        return try! Regex("<(\(tagPattern))>[\\s\\S]*?</\\1>")
+    }()
+
+    /// True if this user message is purely internal metadata (skip for prompt extraction).
+    /// Matches `isMeta: true` messages and messages whose content is entirely metadata tags.
+    public static func isMetadataMessage(_ obj: [String: Any]) -> Bool {
+        if obj["isMeta"] as? Bool == true { return true }
+        guard let text = extractTextContent(from: obj), !text.isEmpty else { return false }
+        let stripped = stripMetadataTags(text)
+        return stripped.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// True only for `isMeta: true` messages (the `<local-command-caveat>` wrapper).
+    /// These are hidden entirely from the History tab.
+    public static func isCaveatMessage(_ obj: [String: Any]) -> Bool {
+        obj["isMeta"] as? Bool == true
+    }
+
+    /// True if this user message contains `<local-command-stdout>` output.
+    /// These should be displayed as assistant-style responses.
+    public static func isLocalCommandStdout(_ obj: [String: Any]) -> Bool {
+        guard let text = extractTextContent(from: obj) else { return false }
+        return text.contains("<local-command-stdout>")
+    }
+
+    /// Extract command name from `<command-name>/foo</command-name>` → `/foo`.
+    public static func parseLocalCommand(_ text: String) -> String? {
+        let regex = try! Regex("<command-name>([\\s\\S]*?)</command-name>")
+        guard let match = text.firstMatch(of: regex) else { return nil }
+        let command = String(match.output[1].substring!)
+        return command.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Extract output text from `<local-command-stdout>text</local-command-stdout>`.
+    public static func parseLocalCommandStdout(_ text: String) -> String? {
+        let regex = try! Regex("<local-command-stdout>([\\s\\S]*?)</local-command-stdout>")
+        guard let match = text.firstMatch(of: regex) else { return nil }
+        let output = String(match.output[1].substring!)
+        return output.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Remove all known metadata XML tag pairs, returning the remaining text.
+    public static func stripMetadataTags(_ text: String) -> String {
+        text.replacing(metadataTagRegex, with: "")
     }
 
     /// Decode a Claude projects directory name to a filesystem path.

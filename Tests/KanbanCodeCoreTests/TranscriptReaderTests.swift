@@ -276,4 +276,59 @@ struct TranscriptReaderTests {
         let alreadyShort = TranscriptReader.shortenPath("/src/main.swift")
         #expect(alreadyShort == "/src/main.swift")
     }
+
+    // MARK: - Metadata filtering
+
+    @Test("Hides caveat messages from history")
+    func hidesCaveatFromHistory() async throws {
+        let dir = try makeTempDir()
+        defer { cleanup(dir) }
+
+        let path = (dir as NSString).appendingPathComponent("test.jsonl")
+        try [
+            #"{"type":"user","isMeta":true,"sessionId":"s1","message":{"content":"<local-command-caveat>wrapped</local-command-caveat>"},"cwd":"/test"}"#,
+            #"{"type":"user","sessionId":"s1","message":{"content":"Real prompt"},"cwd":"/test"}"#,
+            #"{"type":"assistant","sessionId":"s1","message":{"content":[{"type":"text","text":"OK"}]}}"#,
+        ].joined(separator: "\n").write(toFile: path, atomically: true, encoding: .utf8)
+
+        let turns = try await TranscriptReader.readTurns(from: path)
+        // Caveat message should be completely hidden — only 2 turns
+        #expect(turns.count == 2)
+        #expect(turns[0].role == "user")
+        #expect(turns[0].textPreview == "Real prompt")
+        #expect(turns[1].role == "assistant")
+    }
+
+    @Test("Shows /clear command cleanly in history")
+    func showsCommandCleanly() async throws {
+        let dir = try makeTempDir()
+        defer { cleanup(dir) }
+
+        let path = (dir as NSString).appendingPathComponent("test.jsonl")
+        try [
+            #"{"type":"user","sessionId":"s1","message":{"content":"<command-name>/clear</command-name><command-message></command-message><command-args></command-args>"},"cwd":"/test"}"#,
+            #"{"type":"user","sessionId":"s1","message":{"content":"Next prompt"},"cwd":"/test"}"#,
+        ].joined(separator: "\n").write(toFile: path, atomically: true, encoding: .utf8)
+
+        let turns = try await TranscriptReader.readTurns(from: path)
+        #expect(turns.count == 2)
+        #expect(turns[0].textPreview == "/clear")
+        #expect(turns[1].textPreview == "Next prompt")
+    }
+
+    @Test("Shows command stdout as assistant-style turn in history")
+    func showsStdoutAsAssistant() async throws {
+        let dir = try makeTempDir()
+        defer { cleanup(dir) }
+
+        let path = (dir as NSString).appendingPathComponent("test.jsonl")
+        try [
+            #"{"type":"user","sessionId":"s1","message":{"content":"<local-command-stdout>file contents here</local-command-stdout>"},"cwd":"/test"}"#,
+        ].joined(separator: "\n").write(toFile: path, atomically: true, encoding: .utf8)
+
+        let turns = try await TranscriptReader.readTurns(from: path)
+        #expect(turns.count == 1)
+        #expect(turns[0].role == "assistant")
+        #expect(turns[0].textPreview == "file contents here")
+    }
 }
