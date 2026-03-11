@@ -1,6 +1,22 @@
 import SwiftUI
 import KanbanCodeCore
 
+struct CommandItem: Identifiable {
+    let id: String
+    let title: String
+    let icon: String
+    let shortcut: String?
+    let action: () -> Void
+
+    init(_ title: String, icon: String, shortcut: String? = nil, action: @escaping () -> Void) {
+        self.id = "cmd:\(title)"
+        self.title = title
+        self.icon = icon
+        self.shortcut = shortcut
+        self.action = action
+    }
+}
+
 struct SearchOverlay: View {
     @Binding var isPresented: Bool
     let cards: [KanbanCodeCard]
@@ -10,8 +26,13 @@ struct SearchOverlay: View {
     var onForkCard: (KanbanCodeCard) -> Void = { _ in }
     var onCheckpointCard: (KanbanCodeCard) -> Void = { _ in }
 
+    // Command palette actions
+    var commands: [CommandItem] = []
+    var initialQuery: String = ""
+
     @State private var query = ""
     @State private var searchResults: [SearchResultItem] = []
+    @State private var filteredCards: [KanbanCodeCard] = []
     @State private var isDeepSearching = false
     @State private var selectedId: String?
     @State private var searchTask: Task<Void, Never>?
@@ -19,105 +40,125 @@ struct SearchOverlay: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Search field
-            HStack {
-                Image(systemName: "magnifyingglass")
-                    .font(.app(.title3))
-                    .foregroundStyle(.secondary)
-                TextField("Search sessions...", text: $query)
-                    .textFieldStyle(.plain)
-                    .font(.app(.title3))
-                    .focused($isSearchFocused)
-                    .onSubmit {
-                        Task { await deepSearch() }
-                    }
-
-                if isDeepSearching {
-                    ProgressView()
-                        .controlSize(.small)
-                }
-
-                if !query.isEmpty {
-                    Button(action: { query = "" }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.borderless)
-                }
-
-                Button("Esc") {
-                    isPresented = false
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            }
-            .padding(16)
-
+            searchFieldBar
             Divider()
-
-            // Results
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 4) {
-                        if query.isEmpty {
-                            recentSessionsView
-                        } else if !searchResults.isEmpty {
-                            ForEach(searchResults) { result in
-                                SearchResultRow(result: result, queryTerms: queryTerms, isHighlighted: result.id == selectedId)
-                                    .onTapGesture {
-                                        if let card = result.card {
-                                            onSelectCard(card)
-                                            isPresented = false
-                                        }
-                                    }
-                                    .contextMenu {
-                                        if let card = result.card {
-                                            searchCardContextMenu(for: card)
-                                        }
-                                    }
-                            }
-                        } else if !isDeepSearching {
-                            filteredCardsView
-                        }
-                    }
-                    .padding(8)
-                }
-                .onChange(of: selectedId) { _, newId in
-                    if let newId {
-                        withAnimation {
-                            proxy.scrollTo(newId, anchor: .center)
-                        }
-                    }
-                }
-            }
+            resultsSection
         }
         .frame(maxWidth: 600, maxHeight: 500)
         .glassOverlay()
-        .onAppear {
-            isSearchFocused = true
+        .onAppear(perform: handleAppear)
+        .onExitCommand { isPresented = false }
+        .onKeyPress(.downArrow) { moveSelection(by: 1); return .handled }
+        .onKeyPress(.upArrow) { moveSelection(by: -1); return .handled }
+        .onKeyPress(.return) { handleReturn(); return .handled }
+        .background {
+            Button("") { Task { await deepSearch() } }
+                .keyboardShortcut(.return, modifiers: .command)
+                .hidden()
         }
-        .onExitCommand {
-            isPresented = false
-        }
-        .onKeyPress(.downArrow) {
-            moveSelection(by: 1)
-            return .handled
-        }
-        .onKeyPress(.upArrow) {
-            moveSelection(by: -1)
-            return .handled
-        }
-        .onKeyPress(.return) {
-            if selectedId != nil {
-                selectCurrentItem()
-            } else {
-                Task { await deepSearch() }
+        .onChange(of: query) { _, newValue in handleQueryChange(newValue) }
+    }
+
+    private var resultsSection: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 4) {
+                    if isCommandMode {
+                        commandsView
+                    } else if query.isEmpty {
+                        recentCardsView
+                    } else if !searchResults.isEmpty {
+                        deepSearchResultsView
+                    } else if !isDeepSearching {
+                        filteredCardsView
+                    }
+                }
+                .padding(8)
             }
-            return .handled
+            .onChange(of: selectedId) { _, newId in
+                if let newId {
+                    withAnimation { proxy.scrollTo(newId, anchor: .center) }
+                }
+            }
         }
-        .onChange(of: query) { _, newValue in
-            selectedId = nil
-            updateFilter(newValue)
+    }
+
+    private var deepSearchResultsView: some View {
+        ForEach(searchResults) { result in
+            SearchResultRow(result: result, queryTerms: queryTerms, isHighlighted: result.id == selectedId)
+                .onTapGesture {
+                    if let card = result.card {
+                        onSelectCard(card)
+                        isPresented = false
+                    }
+                }
+                .contextMenu {
+                    if let card = result.card {
+                        searchCardContextMenu(for: card)
+                    }
+                }
+        }
+    }
+
+    private func handleAppear() {
+        isSearchFocused = true
+        if !initialQuery.isEmpty {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                query = initialQuery
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
+                    moveCursorToEnd()
+                }
+            }
+        }
+        if initialQuery.isEmpty {
+            let sorted = recentSortedCards
+            if sorted.count >= 2 {
+                selectedId = sorted[1].id
+            }
+        }
+    }
+
+    private func handleReturn() {
+        if selectedId != nil {
+            selectCurrentItem()
+        } else {
+            Task { await deepSearch() }
+        }
+    }
+
+    private func handleQueryChange(_ newValue: String) {
+        updateFilter(newValue)
+        if newValue.hasPrefix(">") {
+            filteredCards = []
+            selectedId = filteredCommands.first?.id
+        } else if !newValue.isEmpty {
+            filteredCards = computeFilteredCards(query: newValue)
+            selectedId = filteredCards.first?.id
+        } else {
+            filteredCards = []
+            let sorted = recentSortedCards
+            selectedId = sorted.count >= 2 ? sorted[1].id : sorted.first?.id
+        }
+    }
+
+    private var isCommandMode: Bool { query.hasPrefix(">") }
+
+    private var commandQuery: String {
+        guard isCommandMode else { return "" }
+        return String(query.dropFirst()).trimmingCharacters(in: .whitespaces).lowercased()
+    }
+
+    private var filteredCommands: [CommandItem] {
+        let q = commandQuery
+        if q.isEmpty { return commands }
+        return commands.filter { $0.title.lowercased().contains(q) }
+    }
+
+    private var recentSortedCards: [KanbanCodeCard] {
+        cards.sorted {
+            let t0 = $0.link.lastOpenedAt ?? $0.link.lastActivity ?? $0.link.updatedAt
+            let t1 = $1.link.lastOpenedAt ?? $1.link.lastActivity ?? $1.link.updatedAt
+            return t0 > t1
         }
     }
 
@@ -125,14 +166,58 @@ struct SearchOverlay: View {
         query.lowercased().components(separatedBy: .whitespaces).filter { !$0.isEmpty }
     }
 
+    private var searchFieldBar: some View {
+        HStack {
+            Image(systemName: "magnifyingglass")
+                .font(.app(.title3))
+                .foregroundStyle(.secondary)
+            TextField("Search or type > for commands...", text: $query)
+                .textFieldStyle(.plain)
+                .font(.app(.title3))
+                .focused($isSearchFocused)
+
+            if isDeepSearching {
+                ProgressView()
+                    .controlSize(.small)
+            }
+
+            if !query.isEmpty {
+                deepSearchHint
+            }
+
+            Button("Esc") {
+                isPresented = false
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+        .padding(16)
+    }
+
+    private var deepSearchHint: some View {
+        HStack(spacing: 4) {
+            Text("⌘↩ deep search")
+                .font(.app(.caption))
+                .foregroundStyle(.tertiary)
+
+            Button(action: { query = "" }) {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.borderless)
+        }
+    }
+
     /// All visible item IDs in current order
     private var visibleIds: [String] {
-        if query.isEmpty {
-            return Array(cards.prefix(10)).map { $0.id }
+        if isCommandMode {
+            return filteredCommands.map(\.id)
+        } else if query.isEmpty {
+            return Array(recentSortedCards.prefix(20)).map(\.id)
         } else if !searchResults.isEmpty {
             return searchResults.map(\.id)
         } else {
-            return filterCards(query: query).map { $0.id }
+            return filteredCards.map(\.id)
         }
     }
 
@@ -141,8 +226,13 @@ struct SearchOverlay: View {
         guard !ids.isEmpty else { return }
 
         if let currentId = selectedId, let currentIdx = ids.firstIndex(of: currentId) {
-            let newIdx = min(max(currentIdx + offset, 0), ids.count - 1)
-            selectedId = ids[newIdx]
+            let newIdx = currentIdx + offset
+            if newIdx < 0 {
+                // Up past first item — deselect (allows Enter for deep search)
+                selectedId = nil
+            } else {
+                selectedId = ids[min(newIdx, ids.count - 1)]
+            }
         } else {
             selectedId = offset > 0 ? ids.first : ids.last
         }
@@ -151,8 +241,13 @@ struct SearchOverlay: View {
     private func selectCurrentItem() {
         guard let currentId = selectedId else { return }
 
-        if query.isEmpty {
-            if let card = cards.prefix(10).first(where: { $0.id == currentId }) {
+        if isCommandMode {
+            if let cmd = filteredCommands.first(where: { $0.id == currentId }) {
+                cmd.action()
+                isPresented = false
+            }
+        } else if query.isEmpty {
+            if let card = recentSortedCards.prefix(20).first(where: { $0.id == currentId }) {
                 onSelectCard(card)
                 isPresented = false
             }
@@ -163,8 +258,7 @@ struct SearchOverlay: View {
                 isPresented = false
             }
         } else {
-            let filtered = filterCards(query: query)
-            if let card = filtered.first(where: { $0.id == currentId }) {
+            if let card = filteredCards.first(where: { $0.id == currentId }) {
                 onSelectCard(card)
                 isPresented = false
             } else {
@@ -174,15 +268,15 @@ struct SearchOverlay: View {
         }
     }
 
-    private var recentSessionsView: some View {
+    private var recentCardsView: some View {
         Group {
-            Text("Recent Sessions")
+            Text("Recent")
                 .font(.app(.caption))
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 8)
                 .padding(.top, 4)
 
-            ForEach(Array(cards.prefix(10))) { card in
+            ForEach(Array(recentSortedCards.prefix(20))) { card in
                 let cardId = card.id
                 SearchCardRow(card: card, queryTerms: [], isHighlighted: cardId == selectedId)
                     .id(cardId)
@@ -195,10 +289,36 @@ struct SearchOverlay: View {
         }
     }
 
+    private var commandsView: some View {
+        Group {
+            Text("Commands")
+                .font(.app(.caption))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+                .padding(.top, 4)
+
+            let cmds = filteredCommands
+            if cmds.isEmpty {
+                Text("No matching commands")
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 20)
+            } else {
+                ForEach(cmds) { cmd in
+                    CommandRow(command: cmd, isHighlighted: cmd.id == selectedId)
+                        .id(cmd.id)
+                        .onTapGesture {
+                            cmd.action()
+                            isPresented = false
+                        }
+                }
+            }
+        }
+    }
+
     private var filteredCardsView: some View {
         Group {
-            let filtered = filterCards(query: query)
-            if filtered.isEmpty {
+            if filteredCards.isEmpty {
                 VStack(spacing: 8) {
                     Text("No matches")
                         .foregroundStyle(.secondary)
@@ -209,7 +329,7 @@ struct SearchOverlay: View {
                 .frame(maxWidth: .infinity)
                 .padding(.top, 20)
             } else {
-                ForEach(filtered) { card in
+                ForEach(filteredCards) { card in
                     let cardId = card.id
                     SearchCardRow(card: card, queryTerms: queryTerms, isHighlighted: cardId == selectedId)
                         .id(cardId)
@@ -223,7 +343,7 @@ struct SearchOverlay: View {
         }
     }
 
-    private func filterCards(query: String) -> [KanbanCodeCard] {
+    private func computeFilteredCards(query: String) -> [KanbanCodeCard] {
         let terms = queryTerms
         guard !terms.isEmpty else { return [] }
         let activeColumns: Set<KanbanCodeColumn> = [.inProgress, .waiting, .inReview, .done]
@@ -327,6 +447,12 @@ struct SearchOverlay: View {
             Label("Checkpoint / Restore", systemImage: "clock.arrow.circlepath")
         }
         .disabled(card.link.sessionLink?.sessionPath == nil)
+    }
+
+    private func moveCursorToEnd() {
+        guard let window = NSApp.keyWindow,
+              let fieldEditor = window.fieldEditor(false, for: nil) as? NSTextView else { return }
+        fieldEditor.setSelectedRange(NSRange(location: fieldEditor.string.count, length: 0))
     }
 
     private func updateFilter(_ query: String) {
@@ -455,7 +581,7 @@ struct SearchResultRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     if let card = result.card {
-                        HighlightedText(text: card.displayTitle, terms: queryTerms)
+                        HighlightedText(text: card.displayTitle, terms: queryTerms, fuzzyInitials: false)
                             .font(.app(.body))
                             .lineLimit(1)
                     } else {
@@ -468,7 +594,7 @@ struct SearchResultRow: View {
 
                 // Snippets (up to 3)
                 ForEach(Array(result.snippets.enumerated()), id: \.offset) { _, snippet in
-                    HighlightedText(text: snippet, terms: queryTerms)
+                    HighlightedText(text: snippet, terms: queryTerms, fuzzyInitials: false)
                         .font(.app(.caption))
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
@@ -497,10 +623,42 @@ struct SearchResultRow: View {
     }
 }
 
+struct CommandRow: View {
+    let command: CommandItem
+    var isHighlighted: Bool = false
+
+    var body: some View {
+        HStack {
+            Image(systemName: command.icon)
+                .frame(width: 20)
+                .foregroundStyle(.secondary)
+            Text(command.title)
+                .font(.app(.body))
+            Spacer()
+            if let shortcut = command.shortcut {
+                Text(shortcut)
+                    .font(.app(.caption))
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 4))
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
+        .background(
+            isHighlighted ? Color.accentColor.opacity(0.1) : Color.clear,
+            in: RoundedRectangle(cornerRadius: 6)
+        )
+    }
+}
+
 /// Highlights query terms in text with yellow background.
 struct HighlightedText: View {
     let text: String
     let terms: [String]
+    var fuzzyInitials: Bool = true
 
     var body: some View {
         if terms.isEmpty {
@@ -529,8 +687,8 @@ struct HighlightedText: View {
                 searchStart = range.upperBound
             }
 
-            // Fall back to fuzzy initials highlighting
-            if !foundSubstring && term.count >= 2 {
+            // Fall back to fuzzy initials highlighting (only for quick filter, not deep search)
+            if fuzzyInitials && !foundSubstring && term.count >= 2 {
                 var termIdx = term.startIndex
                 for word in words {
                     guard termIdx < term.endIndex else { break }

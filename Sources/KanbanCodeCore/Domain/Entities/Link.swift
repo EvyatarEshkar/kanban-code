@@ -145,6 +145,7 @@ public struct Link: Identifiable, Codable, Sendable {
     public var createdAt: Date
     public var updatedAt: Date
     public var lastActivity: Date?
+    public var lastOpenedAt: Date?
     public var manualOverrides: ManualOverrides
     public var manuallyArchived: Bool
     public var source: LinkSource
@@ -272,6 +273,7 @@ public struct Link: Identifiable, Codable, Sendable {
         createdAt: Date = .now,
         updatedAt: Date = .now,
         lastActivity: Date? = nil,
+        lastOpenedAt: Date? = nil,
         manualOverrides: ManualOverrides = ManualOverrides(),
         manuallyArchived: Bool = false,
         source: LinkSource = .discovered,
@@ -297,6 +299,7 @@ public struct Link: Identifiable, Codable, Sendable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.lastActivity = lastActivity
+        self.lastOpenedAt = lastOpenedAt
         self.manualOverrides = manualOverrides
         self.manuallyArchived = manuallyArchived
         self.source = source
@@ -320,7 +323,7 @@ public struct Link: Identifiable, Codable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         // Card-level
-        case id, name, projectPath, column, createdAt, updatedAt, lastActivity
+        case id, name, projectPath, column, createdAt, updatedAt, lastActivity, lastOpenedAt
         case manualOverrides, manuallyArchived, source, promptBody, promptImagePaths, isRemote, isLaunching, sortOrder
         case discoveredBranches, discoveredRepos, assistant
         // Typed links (new nested format)
@@ -341,6 +344,7 @@ public struct Link: Identifiable, Codable, Sendable {
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? .now
         updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? .now
         lastActivity = try c.decodeIfPresent(Date.self, forKey: .lastActivity)
+        lastOpenedAt = try c.decodeIfPresent(Date.self, forKey: .lastOpenedAt)
         manualOverrides = try c.decodeIfPresent(ManualOverrides.self, forKey: .manualOverrides) ?? ManualOverrides()
         manuallyArchived = try c.decodeIfPresent(Bool.self, forKey: .manuallyArchived) ?? false
         source = try c.decodeIfPresent(LinkSource.self, forKey: .source) ?? .discovered
@@ -425,6 +429,7 @@ public struct Link: Identifiable, Codable, Sendable {
         try c.encode(createdAt, forKey: .createdAt)
         try c.encode(updatedAt, forKey: .updatedAt)
         try c.encodeIfPresent(lastActivity, forKey: .lastActivity)
+        try c.encodeIfPresent(lastOpenedAt, forKey: .lastOpenedAt)
         try c.encode(manualOverrides, forKey: .manualOverrides)
         try c.encode(manuallyArchived, forKey: .manuallyArchived)
         try c.encode(source, forKey: .source)

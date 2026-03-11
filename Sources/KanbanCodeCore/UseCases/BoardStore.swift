@@ -455,6 +455,11 @@ public enum Reducer {
 
         case .selectCard(let cardId):
             state.selectedCardId = cardId
+            if let cardId, var link = state.links[cardId] {
+                link.lastOpenedAt = Date()
+                state.links[cardId] = link
+                return [.upsertLink(link)]
+            }
             return []
 
         case .unlinkFromCard(let cardId, let linkType):

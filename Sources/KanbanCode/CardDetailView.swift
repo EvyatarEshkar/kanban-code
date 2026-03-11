@@ -1409,13 +1409,6 @@ struct CardDetailView: View {
             .pickerStyle(.segmented)
             .labelsHidden()
 
-            if card.link.worktreeLink != nil, canCleanupWorktree {
-                Spacer()
-                Button(role: .destructive, action: onCleanupWorktree) {
-                    Label("Cleanup Worktree", systemImage: "trash")
-                }
-                .buttonStyle(.bordered)
-            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)

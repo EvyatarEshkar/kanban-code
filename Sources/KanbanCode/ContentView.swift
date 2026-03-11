@@ -1864,10 +1864,29 @@ struct ContentView: View {
     private func closePalette() {
         showSearch = false
         if terminalHadFocusBeforeSearch {
-            // Delay past the dismiss animation (150ms) so the terminal can accept focus
+            // Delay past the dismiss animation (150ms) so the terminal can accept focus.
+            // Use direct AppKit focus as the SwiftUI binding path can miss updates.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                shouldFocusTerminal = true
+                refocusTerminal()
             }
+        }
+    }
+
+    private func refocusTerminal() {
+        guard let window = NSApp.keyWindow,
+              let contentView = window.contentView else { return }
+        func findTerminal(in view: NSView) -> NSView? {
+            let typeName = String(describing: type(of: view))
+            if typeName.contains("TerminalView"), view.acceptsFirstResponder, !view.isHidden {
+                return view
+            }
+            for sub in view.subviews where !sub.isHidden {
+                if let found = findTerminal(in: sub) { return found }
+            }
+            return nil
+        }
+        if let terminal = findTerminal(in: contentView) {
+            window.makeFirstResponder(terminal)
         }
     }
 
