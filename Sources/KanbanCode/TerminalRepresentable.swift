@@ -17,46 +17,53 @@ import KanbanCodeCore
 final class BatchedTerminalView: LocalProcessTerminalView {
     private var pendingData: [UInt8] = []
     private var flushScheduled = false
-    /// Batch window: 16ms ≈ 1 frame at 60fps.
-    /// Long enough to coalesce a tmux full-screen redraw,
-    /// short enough to feel instant for interactive typing.
-    private static let batchDelay: TimeInterval = 0.016
-    /// Max bytes to parse per runloop iteration. Keeps main thread responsive
-    /// even when Claude streams huge conversations through the terminal.
-    private static let maxChunkSize = 16_384
+
+    // 8ms batching window: LocalProcess dispatches dataReceived via
+    // DispatchQueue.main.sync, so plain .async flushes interleave with
+    // sync calls — each read gets its own flush, defeating batching.
+    // asyncAfter lets many sync'd reads pile up before firing.
+    private static let batchDelay: DispatchTimeInterval = .milliseconds(8)
+
+    // Process in a loop with a time budget: keep feeding 32KB chunks
+    // until we've spent ~4ms on the main thread, then yield. Most tmux
+    // screen redraws (~50KB) finish in one shot (no flicker), but truly
+    // huge batches yield periodically (no UI freeze).
+    private static let chunkSize = 32 * 1024
+    private static let maxBlockSeconds: Double = 0.004  // 4ms
 
     override func dataReceived(slice: ArraySlice<UInt8>) {
         pendingData.append(contentsOf: slice)
         guard !flushScheduled else { return }
         flushScheduled = true
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.batchDelay) { [weak self] in
-            self?.flushPendingData()
+            self?.processNextChunk()
         }
     }
 
-    private func flushPendingData() {
+    private func processNextChunk() {
         guard !pendingData.isEmpty else {
             flushScheduled = false
             return
         }
 
-        if pendingData.count <= Self.maxChunkSize {
-            // Small batch — feed all at once
-            let batch = pendingData
-            pendingData.removeAll(keepingCapacity: true)
-            flushScheduled = false
-            feed(byteArray: batch[...])
-        } else {
-            // Large batch — feed one chunk, yield to runloop between chunks
-            // so the UI stays responsive. flushScheduled stays true so new
-            // incoming data just appends without scheduling a second drain.
-            let chunk = pendingData[0..<Self.maxChunkSize]
+        let start = CACurrentMediaTime()
+
+        while !pendingData.isEmpty {
+            let count = min(Self.chunkSize, pendingData.count)
+            let chunk = pendingData[..<count]
             feed(byteArray: chunk)
-            pendingData = Array(pendingData[Self.maxChunkSize...])
-            DispatchQueue.main.async { [weak self] in
-                self?.flushPendingData()
+            pendingData.removeFirst(count)
+
+            if !pendingData.isEmpty && CACurrentMediaTime() - start > Self.maxBlockSeconds {
+                // Yield to runloop so the UI stays responsive
+                DispatchQueue.main.async { [weak self] in
+                    self?.processNextChunk()
+                }
+                return
             }
         }
+
+        flushScheduled = false
     }
 
     // MARK: - Cmd+hover URL detection
