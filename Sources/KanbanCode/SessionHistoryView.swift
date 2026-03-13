@@ -561,10 +561,9 @@ struct TurnBlockView: View {
                         Text("● ")
                             .font(.sessionDetail())
                             .foregroundStyle(.white)
-                        styledText(turn.textPreview, color: Color(white: 0.85), linksActive: linksActive, parseMarkdown: true)
+                        styledText(turn.textPreview, color: Color(white: 0.85), linksActive: linksActive, parseMarkdown: true, maxLines: 20)
                             .font(.sessionDetail())
                             .textSelection(.enabled)
-                            .lineLimit(20)
                     }
                 }
             } else {
@@ -593,14 +592,32 @@ struct TurnBlockView: View {
 
     // MARK: - Highlighted text helper
 
-    private func styledText(_ text: String, color: Color, linksActive: Bool = false, parseMarkdown: Bool = false) -> Text {
+    private func styledText(_ text: String, color: Color, linksActive: Bool = false, parseMarkdown: Bool = false, maxLines: Int = 0) -> Text {
         var result: AttributedString
-        if parseMarkdown,
-           let md = try? AttributedString(
-               markdown: text,
-               options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-           ) {
-            result = md
+        if parseMarkdown {
+            // Parse markdown per-line to preserve newlines while rendering
+            // inline formatting (**bold**, *italic*, `code`) within each line.
+            let allLines = text.split(separator: "\n", omittingEmptySubsequences: false)
+            let truncated = maxLines > 0 && allLines.count > maxLines
+            let lines = truncated ? allLines.prefix(maxLines) : allLines[...]
+            var combined = AttributedString()
+            for (i, line) in lines.enumerated() {
+                if i > 0 {
+                    combined.append(AttributedString("\n"))
+                }
+                if let md = try? AttributedString(
+                    markdown: String(line),
+                    options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+                ) {
+                    combined.append(md)
+                } else {
+                    combined.append(AttributedString(String(line)))
+                }
+            }
+            if truncated {
+                combined.append(AttributedString("\n…"))
+            }
+            result = combined
             // Style inline code spans with subtle background
             var codeRanges: [Range<AttributedString.Index>] = []
             for run in result.runs {
@@ -679,10 +696,9 @@ struct TurnBlockView: View {
                     Text("  ")
                         .font(.sessionDetail())
                 }
-                styledText(trimmed, color: Color(white: 0.85), linksActive: linksActive, parseMarkdown: true)
+                styledText(trimmed, color: Color(white: 0.85), linksActive: linksActive, parseMarkdown: true, maxLines: 30)
                     .font(.sessionDetail())
                     .textSelection(.enabled)
-                    .lineLimit(30)
             }
         }
     }
