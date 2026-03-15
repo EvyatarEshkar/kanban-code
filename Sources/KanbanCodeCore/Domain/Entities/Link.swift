@@ -530,17 +530,20 @@ public enum LinkSource: String, Codable, Sendable {
 public struct ContentBlock: Sendable {
     public enum Kind: Sendable, Equatable {
         case text
-        case toolUse(name: String, input: [String: String])
-        case toolResult(toolName: String?)
+        case toolUse(name: String, input: [String: String], id: String? = nil)
+        case toolResult(toolName: String?, toolUseId: String? = nil)
         case thinking
     }
 
     public let kind: Kind
     public let text: String // rendered text for display
+    /// Full raw JSON input for tool_use blocks (serialized Data for Sendable safety).
+    public let rawInputJSON: Data?
 
-    public init(kind: Kind, text: String) {
+    public init(kind: Kind, text: String, rawInputJSON: Data? = nil) {
         self.kind = kind
         self.text = text
+        self.rawInputJSON = rawInputJSON
     }
 }
 

@@ -113,7 +113,7 @@ struct GeminiSessionStoreTests {
             return false
         }
         #expect(toolBlocks.count == 1)
-        if case .toolUse(let name, let input) = toolBlocks.first?.kind {
+        if case .toolUse(let name, let input, _) = toolBlocks.first?.kind {
             #expect(name == "Edit File")
             #expect(input["path"] == "src/main.ts")
         }

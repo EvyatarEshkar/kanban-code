@@ -179,7 +179,7 @@ public final class GeminiSessionStore: SessionStore, @unchecked Sendable {
                     switch block.kind {
                     case .text:
                         textParts.append(block.text)
-                    case .toolUse(let name, let input):
+                    case .toolUse(let name, let input, _):
                         toolCalls.append([
                             "id": UUID().uuidString.lowercased(),
                             "name": name,
@@ -494,7 +494,7 @@ public final class GeminiSessionStore: SessionStore, @unchecked Sendable {
             }
         } else {
             let toolNames = blocks.compactMap { block -> String? in
-                if case .toolUse(let name, _) = block.kind { return name }
+                if case .toolUse(let name, _, _) = block.kind { return name }
                 return nil
             }
             if !toolNames.isEmpty {

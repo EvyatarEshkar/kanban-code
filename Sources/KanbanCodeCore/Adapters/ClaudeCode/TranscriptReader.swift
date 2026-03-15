@@ -321,16 +321,17 @@ public enum TranscriptReader {
                     blocks.append(ContentBlock(kind: .text, text: text))
                 }
             case "tool_result":
+                let toolUseId = block["tool_use_id"] as? String
                 let resultText: String
                 if let content = block["content"] as? String {
-                    let lines = content.components(separatedBy: "\n")
-                    resultText = lines.count > 1
-                        ? "Result (\(lines.count) lines)"
-                        : String(content.prefix(200))
+                    // Keep full content (up to 10KB) for chat view; history view truncates via lineLimit
+                    resultText = String(content.prefix(10_240))
+                } else if let contentArr = block["content"] as? [[String: Any]] {
+                    resultText = contentArr.compactMap { $0["text"] as? String }.joined(separator: "\n").prefix(10_240).description
                 } else {
                     resultText = "Result"
                 }
-                blocks.append(ContentBlock(kind: .toolResult(toolName: nil), text: resultText))
+                blocks.append(ContentBlock(kind: .toolResult(toolName: nil, toolUseId: toolUseId), text: resultText))
             default:
                 break
             }
@@ -397,7 +398,7 @@ public enum TranscriptReader {
         } else {
             // Assistant messages with tool_use blocks — list tool names
             let toolNames = blocks.compactMap { block -> String? in
-                if case .toolUse(let name, _) = block.kind { return name }
+                if case .toolUse(let name, _, _) = block.kind { return name }
                 return nil
             }
             if !toolNames.isEmpty {
@@ -414,12 +415,17 @@ public enum TranscriptReader {
     static func parseToolUse(_ block: [String: Any]) -> ContentBlock {
         let name = block["name"] as? String ?? "unknown"
         let input = block["input"] as? [String: Any] ?? [:]
+        let toolId = block["id"] as? String
 
         let (displayText, inputMap) = extractToolInfo(name: name, input: input)
 
+        // Serialize full input to JSON for the chat view to use
+        let rawJSON = try? JSONSerialization.data(withJSONObject: input)
+
         return ContentBlock(
-            kind: .toolUse(name: name, input: inputMap),
-            text: displayText
+            kind: .toolUse(name: name, input: inputMap, id: toolId),
+            text: displayText,
+            rawInputJSON: rawJSON
         )
     }
 

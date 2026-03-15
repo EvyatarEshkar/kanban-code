@@ -108,7 +108,7 @@ struct TranscriptReaderTests {
         #expect(turns.count == 1)
         #expect(turns[0].contentBlocks.count == 1)
         let block = turns[0].contentBlocks[0]
-        if case .toolUse(let name, let input) = block.kind {
+        if case .toolUse(let name, let input, _) = block.kind {
             #expect(name == "Bash")
             #expect(input["command"] == "ls -la")
             #expect(input["description"] == "List files")
@@ -130,7 +130,7 @@ struct TranscriptReaderTests {
 
         let turns = try await TranscriptReader.readTurns(from: path)
         let block = turns[0].contentBlocks[0]
-        if case .toolUse(let name, let input) = block.kind {
+        if case .toolUse(let name, let input, _) = block.kind {
             #expect(name == "Read")
             #expect(input["file_path"] == "/Users/test/src/main.swift")
         } else {
@@ -151,7 +151,7 @@ struct TranscriptReaderTests {
 
         let turns = try await TranscriptReader.readTurns(from: path)
         let block = turns[0].contentBlocks[0]
-        if case .toolUse(let name, let input) = block.kind {
+        if case .toolUse(let name, let input, _) = block.kind {
             #expect(name == "Edit")
             #expect(input["file_path"] == "/src/app.swift")
         } else {
@@ -177,7 +177,7 @@ struct TranscriptReaderTests {
         } else {
             Issue.record("Expected text block")
         }
-        if case .toolUse(let name, _) = turns[0].contentBlocks[1].kind {
+        if case .toolUse(let name, _, _) = turns[0].contentBlocks[1].kind {
             #expect(name == "Read")
         } else {
             Issue.record("Expected toolUse block")
@@ -197,8 +197,10 @@ struct TranscriptReaderTests {
         let turns = try await TranscriptReader.readTurns(from: path)
         #expect(turns.count == 1)
         #expect(turns[0].contentBlocks.count == 1)
-        if case .toolResult = turns[0].contentBlocks[0].kind {
-            #expect(turns[0].contentBlocks[0].text == "Result (3 lines)")
+        if case .toolResult(_, let toolUseId) = turns[0].contentBlocks[0].kind {
+            // Full content preserved (not truncated), toolUseId threaded
+            #expect(turns[0].contentBlocks[0].text == "file contents here\nline 2\nline 3")
+            #expect(toolUseId == "toolu_123")
         } else {
             Issue.record("Expected toolResult block")
         }
@@ -252,7 +254,7 @@ struct TranscriptReaderTests {
 
         let turns = try await TranscriptReader.readTurns(from: path)
         let block = turns[0].contentBlocks[0]
-        if case .toolUse(let name, let input) = block.kind {
+        if case .toolUse(let name, let input, _) = block.kind {
             #expect(name == "Grep")
             #expect(input["pattern"] == "TODO")
             #expect(input["path"] == "/Users/test/src/")

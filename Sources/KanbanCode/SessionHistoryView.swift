@@ -572,7 +572,7 @@ struct TurnBlockView: View {
                     switch block.kind {
                     case .text:
                         textBlockView(block.text, isFirst: i == 0 || !isTextBlock(at: i - 1))
-                    case .toolUse(let name, _):
+                    case .toolUse(let name, _, _):
                         toolUseLine(name: name, displayText: block.text)
                     case .toolResult:
                         toolResultLine(block)

@@ -102,7 +102,7 @@ public final class ClaudeCodeSessionStore: SessionStore, @unchecked Sendable {
                     switch block.kind {
                     case .text:
                         contentBlocks.append(["type": "text", "text": block.text])
-                    case .toolUse(let name, let input):
+                    case .toolUse(let name, let input, _):
                         let toolId = "toolu_migrated_\(UUID().uuidString.prefix(8))"
                         let claudeName = Self.mapToolName(name)
                         let toolBlock: [String: Any] = [
@@ -122,7 +122,7 @@ public final class ClaudeCodeSessionStore: SessionStore, @unchecked Sendable {
                         toolCalls.append((id: toolId, name: claudeName, resultText: resultText))
                     case .thinking:
                         break
-                    case .toolResult(let toolName):
+                    case .toolResult(let toolName, _):
                         // If there's an explicit tool result block, attach it to the last tool call
                         if !toolCalls.isEmpty {
                             toolCalls[toolCalls.count - 1] = (
@@ -195,7 +195,7 @@ public final class ClaudeCodeSessionStore: SessionStore, @unchecked Sendable {
                 let textParts = turn.contentBlocks.compactMap { block -> String? in
                     if case .text = block.kind { return block.text }
                     // Render non-text blocks as text for user messages
-                    if case .toolUse(let name, let input) = block.kind {
+                    if case .toolUse(let name, let input, _) = block.kind {
                         let args = input.map { "\($0.key): \($0.value)" }.joined(separator: ", ")
                         return "[\(name)(\(args))] \(block.text)"
                     }
