@@ -593,38 +593,6 @@ struct ContentView: View {
                 showBoardInExpanded = (sidebarVisibility != .detailOnly)
             }
             .overlay {
-                if showSearch {
-                    Color.black.opacity(0.3)
-                        .ignoresSafeArea()
-                        .onTapGesture { closePalette() }
-
-                    SearchOverlay(
-                        isPresented: Binding(
-                            get: { showSearch },
-                            set: { if !$0 { closePalette() } }
-                        ),
-                        cards: store.state.cards,
-                        sessionStore: store.sessionStore,
-                        onSelectCard: { card in
-                            store.dispatch(.selectCard(cardId: card.id))
-                        },
-                        onResumeCard: { card in
-                            resumeCard(cardId: card.id)
-                        },
-                        onForkCard: { card in pendingForkCardId = card.id },
-                        onCheckpointCard: { card in
-                            store.dispatch(.selectCard(cardId: card.id))
-                        },
-                        commands: paletteCommands,
-                        initialQuery: searchInitialQuery,
-                        deepSearchTrigger: deepSearchTrigger
-                    )
-                    .padding(40)
-                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
-                }
-            }
-            .animation(.easeInOut(duration: 0.15), value: showSearch)
-            .overlay {
                 FolderDropZone(isTargeted: $isDroppingFolder) { url in
                     addDroppedFolder(url)
                 }
@@ -1188,6 +1156,39 @@ struct ContentView: View {
             }
             .background { shortcutButtons }
         } // detail
+        .toolbar(removing: .sidebarToggle)
+        .overlay {
+            if showSearch {
+                Color.black.opacity(0.3)
+                    .ignoresSafeArea()
+                    .onTapGesture { closePalette() }
+
+                SearchOverlay(
+                    isPresented: Binding(
+                        get: { showSearch },
+                        set: { if !$0 { closePalette() } }
+                    ),
+                    cards: store.state.cards,
+                    sessionStore: store.sessionStore,
+                    onSelectCard: { card in
+                        store.dispatch(.selectCard(cardId: card.id))
+                    },
+                    onResumeCard: { card in
+                        resumeCard(cardId: card.id)
+                    },
+                    onForkCard: { card in pendingForkCardId = card.id },
+                    onCheckpointCard: { card in
+                        store.dispatch(.selectCard(cardId: card.id))
+                    },
+                    commands: paletteCommands,
+                    initialQuery: searchInitialQuery,
+                    deepSearchTrigger: deepSearchTrigger
+                )
+                .padding(40)
+                .transition(.opacity.combined(with: .scale(scale: 0.95)))
+            }
+        }
+        .animation(.easeInOut(duration: 0.15), value: showSearch)
         .id(uiTextSize) // Force full re-render when UI scale changes
     }
 
@@ -1389,6 +1390,15 @@ struct ContentView: View {
             }
         }
         .keyboardShortcut(AppShortcut.toggleExpanded.key, modifiers: AppShortcut.toggleExpanded.modifiers)
+        .hidden()
+
+        // Cmd+B — toggle sidebar in expanded mode
+        Button("") {
+            if AppShortcut.toggleSidebar.isActive(in: shortcutContext) {
+                showBoardInExpanded.toggle()
+            }
+        }
+        .keyboardShortcut(AppShortcut.toggleSidebar.key, modifiers: AppShortcut.toggleSidebar.modifiers)
         .hidden()
 
         // Cmd+T — new terminal tab (only when detail open on terminal tab)

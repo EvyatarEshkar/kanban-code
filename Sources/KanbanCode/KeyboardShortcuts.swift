@@ -29,7 +29,8 @@ enum AppShortcut: CaseIterable {
     case openCommandMode        // Cmd+Shift+P
 
     // Detail panel
-    case toggleExpanded         // Cmd+Enter (only when detail open, palette closed)
+    case toggleExpanded         // Cmd+Enter (only when palette closed)
+    case toggleSidebar          // Cmd+B (only in expanded mode, palette closed)
     case newTerminal            // Cmd+T (only when detail open on terminal tab, palette closed)
 
     // Palette-specific
@@ -46,7 +47,7 @@ enum AppShortcut: CaseIterable {
 
     static var allCases: [AppShortcut] {
         [.openPaletteK, .openPaletteP, .openCommandMode,
-         .toggleExpanded, .newTerminal, .deepSearch,
+         .toggleExpanded, .toggleSidebar, .newTerminal, .deepSearch,
          .deselect, .deleteCard, .deleteCardForward,
          .project1, .project2, .project3, .project4, .project5,
          .project6, .project7, .project8, .project9]
@@ -58,6 +59,7 @@ enum AppShortcut: CaseIterable {
         case .openPaletteP: return "p"
         case .openCommandMode: return "p"
         case .toggleExpanded, .deepSearch: return .return
+        case .toggleSidebar: return "b"
         case .newTerminal: return "t"
         case .deselect: return .escape
         case .deleteCard: return .delete
@@ -79,6 +81,7 @@ enum AppShortcut: CaseIterable {
         case .openPaletteK, .openPaletteP: return .command
         case .openCommandMode: return [.command, .shift]
         case .toggleExpanded, .deepSearch: return .command
+        case .toggleSidebar: return .command
         case .newTerminal: return .command
         case .deselect, .deleteCard, .deleteCardForward: return []
         case .project1, .project2, .project3, .project4, .project5,
@@ -96,6 +99,10 @@ enum AppShortcut: CaseIterable {
         // Toggle between kanban and expanded+sidebar mode
         case .toggleExpanded:
             return !ctx.paletteOpen
+
+        // Toggle sidebar in expanded (list) mode
+        case .toggleSidebar:
+            return ctx.expandedDetail && !ctx.paletteOpen
 
         // New terminal only when detail is open on terminal tab AND palette is closed
         case .newTerminal:
