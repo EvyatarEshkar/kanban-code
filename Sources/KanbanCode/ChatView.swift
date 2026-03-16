@@ -26,13 +26,16 @@ struct ChatView: View {
 
     @State private var isBusyFromPane = false
     @State private var dismissedBusy = false
+    @State private var busyGraceUntil: Date = .distantPast
     @Binding var pendingMessage: String?
 
     /// Use pane output as ground truth, falling back to hook state only if no tmux session.
-    /// Also optimistically show busy when a pending message was just sent.
+    /// Also optimistically show busy when a pending message was just sent,
+    /// and during a grace period after pending clears (before tmux catches up).
     private var isAssistantBusy: Bool {
         if dismissedBusy { return false }
         if pendingMessage != nil { return true }
+        if Date.now < busyGraceUntil { return true }
         if tmuxSessionName != nil { return isBusyFromPane }
         return activityState == .activelyWorking
     }
@@ -48,6 +51,8 @@ struct ChatView: View {
         }
         if hasMatch {
             pendingMessage = nil
+            // Grace period: keep showing "working" until tmux poll catches up
+            busyGraceUntil = Date.now.addingTimeInterval(8)
         }
     }
 
@@ -109,6 +114,10 @@ struct ChatView: View {
                 assistant: assistant,
                 isReady: !isAssistantBusy,
                 cardId: cardId,
+                userMessageHistory: turns.filter { $0.role == "user" }.reversed().compactMap {
+                    let text = $0.contentBlocks.compactMap { b in if case .text = b.kind { return b.text } else { return nil } }.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+                    return text.isEmpty ? nil : text
+                },
                 onSend: { text, images in
                     pendingMessage = text
                     onSendPrompt(text, images)
@@ -557,33 +566,48 @@ struct ChatMessageView: View, Equatable {
 
     private var userBubble: some View {
         VStack(alignment: .trailing, spacing: 4) {
-            ForEach(turn.contentBlocks.indices, id: \.self) { i in
-                let block = turn.contentBlocks[i]
-                if case .text = block.kind {
-                    if block.text.contains("[Request interrupted by user") {
-                        // Render interruption as plain italic text, no bubble
-                        Text(block.text)
-                            .font(.app(.caption))
-                            .italic()
-                            .foregroundStyle(.secondary)
-                    } else if block.text.hasPrefix("📎") {
-                        Text(block.text)
-                            .font(.app(.caption))
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text(block.text)
-                            .font(.app(.body))
-                            .textSelection(.enabled)
+            // Image attachment chips
+            if turn.imageCount > 0 {
+                HStack(spacing: 4) {
+                    ForEach(0..<turn.imageCount, id: \.self) { i in
+                        HStack(spacing: 4) {
+                            Image(systemName: "photo")
+                                .font(.system(size: 12))
+                            Text("Image #\(i + 1)")
+                                .font(.app(.caption))
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.primary.opacity(0.06), in: Capsule())
+                        .foregroundStyle(.secondary)
                     }
                 }
             }
-        }
-        .padding(.horizontal, isInterruption ? 0 : 14)
-        .padding(.vertical, isInterruption ? 4 : 10)
-        .background {
-            if !isInterruption {
-                RoundedRectangle(cornerRadius: 18)
-                    .fill(Color.primary.opacity(0.06))
+            // Text bubble
+            VStack(alignment: .trailing, spacing: 4) {
+                ForEach(turn.contentBlocks.indices, id: \.self) { i in
+                    let block = turn.contentBlocks[i]
+                    if case .text = block.kind {
+                        if block.text.contains("[Request interrupted by user") {
+                            Text(block.text)
+                                .font(.app(.caption))
+                                .italic()
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text(block.text)
+                                .font(.app(.body))
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, isInterruption ? 0 : 14)
+            .padding(.vertical, isInterruption ? 4 : 10)
+            .background {
+                if !isInterruption {
+                    RoundedRectangle(cornerRadius: 18)
+                        .fill(Color.primary.opacity(0.06))
+                }
             }
         }
         .frame(maxWidth: userBubbleMaxWidth, alignment: .trailing)
@@ -1283,6 +1307,7 @@ struct ChatInputBar: View {
     let assistant: CodingAssistant
     let isReady: Bool
     var cardId: String = ""
+    var userMessageHistory: [String] = [] // Most recent first
     var onSend: (String, [String]) -> Void = { _, _ in }
     var onQueuePrompt: ((String, Bool, [String]) -> Void)?
 
@@ -1290,6 +1315,7 @@ struct ChatInputBar: View {
     @Binding var pastedImages: [Data]
     @FocusState private var isFocused: Bool
     @State private var showQueueDialog = false
+    @State private var historyIndex: Int = -1 // -1 = current draft, 0 = last sent, 1 = second to last...
 
     private var canSend: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -1337,6 +1363,7 @@ struct ChatInputBar: View {
                     identity: cardId,
                     onSubmit: send,
                     onCmdSubmit: onQueuePrompt != nil ? { showQueueDialog = true } : nil,
+                    onUpArrowAtStart: { recallHistory() },
                     onImagePaste: { data in pastedImages.append(data) }
                 )
                 .focused($isFocused)
@@ -1420,6 +1447,14 @@ struct ChatInputBar: View {
         onSend(trimmed, imagePaths)
         text = ""
         pastedImages = []
+        historyIndex = -1
+    }
+
+    private func recallHistory() {
+        let nextIndex = historyIndex + 1
+        guard nextIndex < userMessageHistory.count else { return }
+        historyIndex = nextIndex
+        text = userMessageHistory[nextIndex]
     }
 }
 

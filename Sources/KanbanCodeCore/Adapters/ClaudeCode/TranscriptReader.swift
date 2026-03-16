@@ -117,13 +117,15 @@ public enum TranscriptReader {
                 textPreview = Self.buildTextPreview(blocks: blocks, role: role)
             }
             let timestamp = obj["timestamp"] as? String
+            let imgCount = (type == "user") ? Self.countImages(in: obj) : 0
             turns.append(ConversationTurn(
                 index: i,
                 lineNumber: info.byteOffset, // stable: byte offset in original file
                 role: role,
                 textPreview: textPreview,
                 timestamp: timestamp,
-                contentBlocks: blocks
+                contentBlocks: blocks,
+                imageCount: imgCount
             ))
         }
 
@@ -321,6 +323,12 @@ public enum TranscriptReader {
 
     // MARK: - User message parsing
 
+    static func countImages(in obj: [String: Any]) -> Int {
+        guard let message = obj["message"] as? [String: Any],
+              let content = message["content"] as? [[String: Any]] else { return 0 }
+        return content.filter { ($0["type"] as? String) == "image" }.count
+    }
+
     static func extractUserBlocks(from obj: [String: Any]) -> [ContentBlock] {
         // Hide caveat wrapper messages entirely
         if JsonlParser.isCaveatMessage(obj) { return [] }
@@ -335,24 +343,13 @@ public enum TranscriptReader {
             if let stdout = JsonlParser.parseLocalCommandStdout(text) {
                 return [ContentBlock(kind: .text, text: stdout)]
             }
-            // Count images in the content array
-            var imageCount = 0
-            if let message = obj["message"] as? [String: Any],
-               let content = message["content"] as? [[String: Any]] {
-                imageCount = content.filter { ($0["type"] as? String) == "image" }.count
-            }
             // Strip any remaining metadata tags from mixed-content messages
             let cleaned = JsonlParser.stripMetadataTags(text)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            var result: [ContentBlock] = []
-            if imageCount > 0 {
-                let label = imageCount == 1 ? "📎 1 image attached" : "📎 \(imageCount) images attached"
-                result.append(ContentBlock(kind: .text, text: label))
-            }
             if !cleaned.isEmpty {
-                result.append(ContentBlock(kind: .text, text: cleaned))
+                return [ContentBlock(kind: .text, text: cleaned)]
             }
-            return result
+            return []
         }
 
         // Check for tool_result blocks in message.content
@@ -362,7 +359,6 @@ public enum TranscriptReader {
         }
 
         var blocks: [ContentBlock] = []
-        var imageCount = 0
         for block in content {
             guard let blockType = block["type"] as? String else { continue }
             switch blockType {
@@ -370,8 +366,6 @@ public enum TranscriptReader {
                 if let text = block["text"] as? String, !text.isEmpty {
                     blocks.append(ContentBlock(kind: .text, text: text))
                 }
-            case "image":
-                imageCount += 1
             case "tool_result":
                 let toolUseId = block["tool_use_id"] as? String
                 let resultText: String
@@ -386,10 +380,6 @@ public enum TranscriptReader {
             default:
                 break
             }
-        }
-        if imageCount > 0 {
-            let label = imageCount == 1 ? "📎 1 image attached" : "📎 \(imageCount) images attached"
-            blocks.insert(ContentBlock(kind: .text, text: label), at: 0)
         }
         return blocks
     }

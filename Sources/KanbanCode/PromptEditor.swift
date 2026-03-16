@@ -12,6 +12,7 @@ struct PromptEditor: NSViewRepresentable {
     var identity: String = ""
     var onSubmit: () -> Void = {}
     var onCmdSubmit: (() -> Void)?
+    var onUpArrowAtStart: (() -> Void)?
     var onImagePaste: ((Data) -> Void)?
 
     func makeCoordinator() -> Coordinator {
@@ -43,6 +44,7 @@ struct PromptEditor: NSViewRepresentable {
         textView.delegate = context.coordinator
         textView.onSubmit = onSubmit
         textView.onCmdSubmit = onCmdSubmit
+        textView.onUpArrowAtStart = onUpArrowAtStart
         textView.onImagePaste = onImagePaste
         textView.placeholderString = placeholder
 
@@ -70,6 +72,7 @@ struct PromptEditor: NSViewRepresentable {
         }
         textView.onSubmit = onSubmit
         textView.onCmdSubmit = onCmdSubmit
+        textView.onUpArrowAtStart = onUpArrowAtStart
         textView.onImagePaste = onImagePaste
         textView.font = font
 
@@ -152,6 +155,7 @@ final class PromptEditorScrollView: NSScrollView {
 final class SubmitTextView: NSTextView {
     var onSubmit: () -> Void = {}
     var onCmdSubmit: (() -> Void)?
+    var onUpArrowAtStart: (() -> Void)?
     var onImagePaste: ((Data) -> Void)?
     var placeholderString: String = ""
 
@@ -205,6 +209,15 @@ final class SubmitTextView: NSTextView {
             // Shift+Enter → insert newline
             insertNewline(nil)
             return
+        }
+
+        // Up arrow at start of text → recall previous message
+        if event.keyCode == 126 { // up arrow
+            let cursorAtStart = selectedRange().location == 0 && selectedRange().length == 0
+            if (cursorAtStart || string.isEmpty), let handler = onUpArrowAtStart {
+                handler()
+                return
+            }
         }
 
         super.keyDown(with: event)

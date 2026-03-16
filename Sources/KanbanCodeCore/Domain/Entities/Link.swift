@@ -587,13 +587,15 @@ public struct ConversationTurn: Sendable {
     public let textPreview: String
     public let timestamp: String?
     public let contentBlocks: [ContentBlock]
+    public let imageCount: Int
 
-    public init(index: Int, lineNumber: Int, role: String, textPreview: String, timestamp: String? = nil, contentBlocks: [ContentBlock] = []) {
+    public init(index: Int, lineNumber: Int, role: String, textPreview: String, timestamp: String? = nil, contentBlocks: [ContentBlock] = [], imageCount: Int = 0) {
         self.index = index
         self.lineNumber = lineNumber
         self.role = role
         self.textPreview = textPreview
         self.timestamp = timestamp
         self.contentBlocks = contentBlocks
+        self.imageCount = imageCount
     }
 }
