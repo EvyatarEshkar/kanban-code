@@ -62,7 +62,10 @@ struct ChatView: View {
                     pendingMessage: pendingMessage,
                     onLoadMore: onLoadMore,
                     onFork: onFork,
-                    onCheckpoint: onCheckpoint
+                    onCheckpoint: onCheckpoint,
+                    onSendAnswer: { answer in
+                        onSendPrompt(answer, [])
+                    }
                 )
 
                 // Working indicator — left-aligned pill, same bg as page
@@ -182,7 +185,7 @@ private struct ChatMessageList: View {
                         )
                         .equatable()
                         .id(turn.lineNumber)
-                        .padding(.vertical, 4)
+                        .padding(.vertical, 1)
                         .onAppear {
                             if turn.lineNumber == turns.last?.lineNumber {
                                 isAtBottom = true
