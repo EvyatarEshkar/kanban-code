@@ -40,6 +40,7 @@ public enum TranscriptReader {
     }
 
     /// Fast tail read: seek to end - tailSize, read lines from there.
+    /// Uses byte offset in the file as lineNumber for stable identity across reloads.
     private static func readTailBytes(url: URL, fileSize: UInt64, tailSize: UInt64, maxTurns: Int) async throws -> ReadResult {
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
@@ -52,20 +53,28 @@ public enum TranscriptReader {
             return ReadResult(turns: [], totalLineCount: 0, hasMore: false)
         }
 
-        var lines = tailString.components(separatedBy: "\n")
-        // First line is likely partial (we seeked mid-line), drop it
-        if seekPos > 0 { lines.removeFirst() }
+        // Split into lines, tracking byte offsets for stable IDs
+        var turnLineInfos: [(byteOffset: Int, line: String)] = []
+        var bytePos = Int(seekPos)
 
-        var turnLineInfos: [(lineNumber: Int, line: String)] = []
-        for (i, line) in lines.enumerated() {
+        // First line is likely partial (we seeked mid-line), skip it
+        var lines = tailString.components(separatedBy: "\n")
+        if seekPos > 0 && !lines.isEmpty {
+            bytePos += lines[0].utf8.count + 1 // +1 for \n
+            lines.removeFirst()
+        }
+
+        for line in lines {
+            let lineByteOffset = bytePos
+            bytePos += line.utf8.count + 1 // +1 for \n
+
             guard !line.isEmpty, line.contains("\"type\"") else { continue }
             guard let data = line.data(using: .utf8),
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let type = obj["type"] as? String,
                   type == "user" || type == "assistant" else { continue }
             if type == "user" && JsonlParser.isCaveatMessage(obj) { continue }
-            // lineNumber is approximate (relative to tail chunk)
-            turnLineInfos.append((i + 1, line))
+            turnLineInfos.append((lineByteOffset, line))
         }
 
         // Keep only last maxTurns
@@ -91,7 +100,7 @@ public enum TranscriptReader {
             let timestamp = obj["timestamp"] as? String
             turns.append(ConversationTurn(
                 index: i,
-                lineNumber: info.lineNumber,
+                lineNumber: info.byteOffset, // stable: byte offset in original file
                 role: role,
                 textPreview: textPreview,
                 timestamp: timestamp,

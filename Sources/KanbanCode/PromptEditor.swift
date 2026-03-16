@@ -55,8 +55,9 @@ struct PromptEditor: NSViewRepresentable {
         // processes the binding update, `text` can be stale. Setting textView.string
         // with stale text resets the cursor to the end.
         let isEditing = textView.window?.firstResponder === textView
-        if textView.string != text && !isEditing {
+        if textView.string != text && (!isEditing || text.isEmpty) {
             textView.string = text
+            textView.needsDisplay = true // redraw placeholder if cleared
         }
         textView.onSubmit = onSubmit
         textView.onImagePaste = onImagePaste

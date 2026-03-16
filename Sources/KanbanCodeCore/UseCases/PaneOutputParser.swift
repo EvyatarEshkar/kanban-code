@@ -26,4 +26,15 @@ public enum PaneOutputParser {
     public static func isClaudeReady(_ paneOutput: String) -> Bool {
         isReady(paneOutput, assistant: .claude)
     }
+
+    /// Check if Claude Code is actively working by looking for the status line
+    /// (e.g. "✶ Brewing… (56s · ↓ 539 tokens)") in the bottom of pane output.
+    /// tmux capture-pane includes Unicode control/color codes between the ellipsis
+    /// and the parenthesis, so we just search for `…` (U+2026) in the tail.
+    public static func isWorking(_ paneOutput: String) -> Bool {
+        // Check last ~1000 chars — the status line can be 600+ chars from
+        // the end due to the ──── border lines and footer in Claude's TUI.
+        let tail = paneOutput.suffix(1000)
+        return tail.contains("\u{2026}")
+    }
 }

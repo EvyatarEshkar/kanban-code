@@ -22,11 +22,8 @@ struct ChatView: View {
     @Binding var draftText: String
     @Binding var draftImages: [Data]
 
-    @State private var isAtBottom = true
-    @State private var hasNewMessages = false
-    @State private var lastSeenCount = 0
     @State private var isBusyFromPane = false
-    @State private var panePollTask: Task<Void, Never>?
+    @Binding var pendingMessage: String?
 
     /// Use pane output as ground truth, falling back to hook state only if no tmux session.
     private var isAssistantBusy: Bool {
@@ -36,146 +33,290 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(spacing: 0) {
-                        if hasMoreTurns {
-                            ProgressView()
-                                .controlSize(.small)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 8)
-                                .onAppear { onLoadMore?() }
-                        }
+            ChatMessageList(
+                turns: turns,
+                assistant: assistant,
+                hasMoreTurns: hasMoreTurns,
+                isAssistantBusy: isAssistantBusy,
+                tmuxSessionName: tmuxSessionName,
+                isBusyFromPane: $isBusyFromPane,
+                pendingMessage: pendingMessage,
+                onLoadMore: onLoadMore,
+                onFork: onFork,
+                onCheckpoint: onCheckpoint
+            )
 
-                        ForEach(turns, id: \.lineNumber) { turn in
-                            ChatMessageView(
-                                turn: turn,
-                                assistant: assistant,
-                                allTurns: turns,
-                                onCopy: { text in
-                                    NSPasteboard.general.clearContents()
-                                    NSPasteboard.general.setString(text, forType: .string)
-                                },
-                                onFork: onFork,
-                                onCheckpoint: onCheckpoint
-                            )
-                            .id(turn.lineNumber)
-                            .padding(.vertical, 4)
-                            .onAppear {
-                                if turn.lineNumber == turns.last?.lineNumber {
-                                    isAtBottom = true
-                                    hasNewMessages = false
-                                }
-                            }
-                            .onDisappear {
-                                if turn.lineNumber == turns.last?.lineNumber {
-                                    isAtBottom = false
-                                }
-                            }
-                        }
-
-                        if isAssistantBusy {
-                            WorkingIndicator(assistant: assistant)
-                                .frame(maxWidth: chatMaxWidth)
-                                .frame(maxWidth: .infinity)
-                                .id("working")
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                }
-                .defaultScrollAnchor(.bottom)
-                .onChange(of: turns.count) {
-                    if turns.count > lastSeenCount {
-                        let isInitialLoad = lastSeenCount == 0
-                        if isAtBottom || isInitialLoad {
-                            let target = turns.last?.lineNumber
-                            Task { @MainActor in
-                                // Initial load needs a layout pass first
-                                if isInitialLoad {
-                                    try? await Task.sleep(for: .milliseconds(100))
-                                }
-                                if let target {
-                                    proxy.scrollTo(target, anchor: .bottom)
-                                }
-                            }
-                        } else {
-                            hasNewMessages = true
-                        }
-                        lastSeenCount = turns.count
-                    }
-                }
-                .onAppear {
-                    lastSeenCount = turns.count
-                    startPanePolling()
-                }
-                .overlay(alignment: .bottom) {
-                    if hasNewMessages {
-                        Button {
-                            if let last = turns.last {
-                                proxy.scrollTo(last.lineNumber, anchor: .bottom)
-                            }
-                            hasNewMessages = false
-                            isAtBottom = true
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: "arrow.down")
-                                    .font(.system(size: 11, weight: .medium))
-                                Text("New messages")
-                                    .font(.system(size: 12, weight: .medium))
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                        }
-                        .buttonStyle(.plain)
-                        .glassEffect(.regular, in: .capsule)
-                        .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
-                        .padding(.bottom, 8)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                    }
-                }
-                .animation(.easeInOut(duration: 0.2), value: hasNewMessages)
-            }
-
-            // Input bar at bottom
             ChatInputBar(
                 assistant: assistant,
                 isReady: !isAssistantBusy,
-                onSend: onSendPrompt,
+                onSend: { text, images in
+                    pendingMessage = text
+                    onSendPrompt(text, images)
+                },
                 text: $draftText,
                 pastedImages: $draftImages
             )
         }
-    }
-
-    private func startPanePolling() {
-        panePollTask?.cancel()
-        guard let session = tmuxSessionName else { return }
-        panePollTask = Task {
-            let tmux = TmuxAdapter()
-            while !Task.isCancelled {
-                do {
-                    let output = try await tmux.capturePane(sessionName: session)
-                    let ready = PaneOutputParser.isReady(output, assistant: assistant)
-                    await MainActor.run { isBusyFromPane = !ready }
-                } catch {
-                    // Session might not exist yet
+        .onChange(of: turns.count) {
+            // Clear pending message when a new user turn arrives
+            if let pending = pendingMessage {
+                if turns.last(where: { $0.role == "user" })?.contentBlocks.contains(where: {
+                    if case .text = $0.kind { return $0.text.contains(pending.prefix(50)) }
+                    return false
+                }) == true {
+                    pendingMessage = nil
                 }
-                try? await Task.sleep(for: .seconds(2))
             }
         }
+    }
+
+}
+
+// MARK: - Chat Message List (isolated from input bar state)
+
+private struct ChatMessageList: View {
+    let turns: [ConversationTurn]
+    let assistant: CodingAssistant
+    var hasMoreTurns: Bool = false
+    var isAssistantBusy: Bool = false
+    var tmuxSessionName: String?
+    @Binding var isBusyFromPane: Bool
+    var pendingMessage: String?
+    var onLoadMore: (() -> Void)?
+    var onFork: (() -> Void)?
+    var onCheckpoint: ((ConversationTurn) -> Void)?
+
+    @State private var isAtBottom = true
+    @State private var hasNewMessages = false
+    @State private var lastSeenCount = 0
+    @State private var lastSeenLineNumber: Int?
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    if hasMoreTurns {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .onAppear { onLoadMore?() }
+                    }
+
+                    let groupInfo = Self.computeGroupInfo(turns: turns)
+                    let toolResults = Self.computeToolResults(turns: turns)
+
+                    ForEach(turns, id: \.lineNumber) { turn in
+                        ChatMessageView(
+                            turn: turn,
+                            assistant: assistant,
+                            toolResultMap: toolResults[turn.lineNumber] ?? [:],
+                            isLastInGroup: groupInfo[turn.lineNumber] ?? true,
+                            onCopy: { text in
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(text, forType: .string)
+                            },
+                            onFork: onFork,
+                            onCheckpoint: onCheckpoint
+                        )
+                        .equatable()
+                        .id(turn.lineNumber)
+                        .padding(.vertical, 4)
+                        .onAppear {
+                            if turn.lineNumber == turns.last?.lineNumber {
+                                isAtBottom = true
+                                hasNewMessages = false
+                            }
+                        }
+                        .onDisappear {
+                            if turn.lineNumber == turns.last?.lineNumber {
+                                isAtBottom = false
+                            }
+                        }
+                    }
+
+                    // Optimistic pending message (sending...)
+                    if let pending = pendingMessage {
+                        HStack {
+                            Spacer(minLength: 0)
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text(pending)
+                                    .font(.app(.body))
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 18))
+                            .opacity(0.5)
+                            .frame(maxWidth: userBubbleMaxWidth, alignment: .trailing)
+                            .frame(maxWidth: chatMaxWidth, alignment: .trailing)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.vertical, 4)
+                        .id("pending")
+                    }
+
+                    // Always reserve space for working indicator + breathing room
+                    WorkingIndicator(assistant: assistant)
+                        .frame(maxWidth: chatMaxWidth)
+                        .frame(maxWidth: .infinity)
+                        .opacity(isAssistantBusy ? 1 : 0)
+                        .id("bottom-spacer")
+                }
+                .padding(.horizontal, 16)
+            }
+            .onChange(of: turns.last?.lineNumber) {
+                // New message at bottom — auto-scroll or show pill
+                guard let newLast = turns.last?.lineNumber else { return }
+                let isInitial = lastSeenLineNumber == nil
+                if isInitial || (newLast != lastSeenLineNumber && (isAtBottom || isInitial)) {
+                    scrollToBottom(proxy: proxy, delay: isInitial)
+                } else if newLast != lastSeenLineNumber {
+                    hasNewMessages = true
+                }
+                lastSeenLineNumber = newLast
+                lastSeenCount = turns.count
+            }
+            .onChange(of: isAssistantBusy) {
+                if isAssistantBusy && isAtBottom {
+                    scrollToBottom(proxy: proxy, delay: false)
+                }
+            }
+            .onAppear {
+                // Fix blank screen: force scroll to bottom on re-appear
+                lastSeenCount = turns.count
+                lastSeenLineNumber = turns.last?.lineNumber
+                if !turns.isEmpty {
+                    scrollToBottom(proxy: proxy, delay: true)
+                }
+            }
+            .onChange(of: turns.first?.lineNumber) {
+                // Card changed — reset and scroll
+                lastSeenLineNumber = nil
+                isAtBottom = true
+                hasNewMessages = false
+                scrollToBottom(proxy: proxy, delay: true)
+            }
+            .task(id: tmuxSessionName) {
+                guard let session = tmuxSessionName else {
+                    isBusyFromPane = false
+                    return
+                }
+                let tmux = TmuxAdapter()
+                while !Task.isCancelled {
+                    let newBusy: Bool
+                    do {
+                        let output = try await tmux.capturePane(sessionName: session)
+                        newBusy = PaneOutputParser.isWorking(output)
+                    } catch {
+                        newBusy = false
+                    }
+                    if newBusy != isBusyFromPane {
+                        isBusyFromPane = newBusy
+                    }
+                    try? await Task.sleep(for: .seconds(5))
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if hasNewMessages {
+                    Button {
+                        proxy.scrollTo("bottom-spacer", anchor: .bottom)
+                        hasNewMessages = false
+                        isAtBottom = true
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.down")
+                                .font(.system(size: 11, weight: .medium))
+                            Text("New messages")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                    }
+                    .buttonStyle(.plain)
+                    .glassEffect(.regular, in: .capsule)
+                    .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
+                    .padding(.bottom, 8)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .animation(.easeInOut(duration: 0.2), value: hasNewMessages)
+        }
+    }
+
+    private func scrollToBottom(proxy: ScrollViewProxy, delay: Bool) {
+        Task { @MainActor in
+            if delay { try? await Task.sleep(for: .milliseconds(50)) }
+            proxy.scrollTo("bottom-spacer", anchor: .bottom)
+        }
+    }
+
+    /// Precompute which turns are the last in their group (O(n) once, not O(n²) per render).
+    private static func computeGroupInfo(turns: [ConversationTurn]) -> [Int: Bool] {
+        var result: [Int: Bool] = [:]
+        let visibleTurns = turns.filter { turn in
+            if turn.role == "user" {
+                return turn.contentBlocks.contains {
+                    if case .text = $0.kind { return !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                    return false
+                }
+            }
+            return turn.contentBlocks.contains { block in
+                switch block.kind {
+                case .text: return !block.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                case .toolUse: return true
+                case .toolResult: return false
+                case .thinking: return !block.text.isEmpty
+                }
+            }
+        }
+        for (i, turn) in visibleTurns.enumerated() {
+            let isLast = (i == visibleTurns.count - 1) || visibleTurns[i + 1].role != turn.role
+            result[turn.lineNumber] = isLast
+        }
+        return result
+    }
+    /// Precompute tool result pairing: maps turn lineNumber → (toolUseId → result ContentBlock).
+    private static func computeToolResults(turns: [ConversationTurn]) -> [Int: [String: ContentBlock]] {
+        var result: [Int: [String: ContentBlock]] = [:]
+        for (i, turn) in turns.enumerated() where turn.role == "assistant" {
+            // Look at the next turn for tool results
+            if i + 1 < turns.count && turns[i + 1].role == "user" {
+                let userTurn = turns[i + 1]
+                var map: [String: ContentBlock] = [:]
+                for block in userTurn.contentBlocks {
+                    if case .toolResult(_, let toolUseId) = block.kind, let id = toolUseId {
+                        map[id] = block
+                    }
+                }
+                if !map.isEmpty {
+                    result[turn.lineNumber] = map
+                }
+            }
+        }
+        return result
     }
 }
 
 // MARK: - Chat Message View
 
-struct ChatMessageView: View {
+struct ChatMessageView: View, Equatable {
     let turn: ConversationTurn
     let assistant: CodingAssistant
-    let allTurns: [ConversationTurn]
+    var toolResultMap: [String: ContentBlock] = [:]
+    var isLastInGroup: Bool = true
     var onCopy: ((String) -> Void)?
     var onFork: (() -> Void)?
     var onCheckpoint: ((ConversationTurn) -> Void)?
     @State private var isHovered = false
+
+    nonisolated static func == (lhs: ChatMessageView, rhs: ChatMessageView) -> Bool {
+        lhs.turn.lineNumber == rhs.turn.lineNumber &&
+        lhs.turn.contentBlocks.count == rhs.turn.contentBlocks.count &&
+        lhs.isLastInGroup == rhs.isLastInGroup &&
+        lhs.assistant == rhs.assistant
+    }
 
     private var hasContent: Bool {
         if turn.role == "user" {
@@ -195,51 +336,11 @@ struct ChatMessageView: View {
         }
     }
 
-    /// Whether this is the last turn before the next *visible* turn of a different role.
-    /// Skips hidden user turns (e.g. turns with only tool_result blocks).
-    private var isLastInGroup: Bool {
-        guard let idx = allTurns.firstIndex(where: { $0.lineNumber == turn.lineNumber }) else { return true }
-        // Find the next turn that would actually be visible
-        var nextIdx = allTurns.index(after: idx)
-        while nextIdx < allTurns.endIndex {
-            let next = allTurns[nextIdx]
-            // Check if this turn would be visible (same logic as hasContent)
-            let isVisible: Bool
-            if next.role == "user" {
-                isVisible = next.contentBlocks.contains {
-                    if case .text = $0.kind { return !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-                    return false
-                }
-            } else {
-                isVisible = next.contentBlocks.contains { block in
-                    switch block.kind {
-                    case .text: return !block.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    case .toolUse: return true
-                    case .toolResult: return false
-                    case .thinking: return !block.text.isEmpty
-                    }
-                }
-            }
-            if isVisible { return next.role != turn.role }
-            nextIdx = allTurns.index(after: nextIdx)
-        }
-        return true // last visible turn overall
-    }
-
-    /// Collect all text from consecutive same-role turns ending at this turn.
-    private var groupText: String {
-        guard let idx = allTurns.firstIndex(where: { $0.lineNumber == turn.lineNumber }) else { return "" }
-        var texts: [String] = []
-        var i = idx
-        while i >= allTurns.startIndex && allTurns[i].role == turn.role {
-            let turnTexts = allTurns[i].contentBlocks
-                .filter { if case .text = $0.kind { return true }; return false }
-                .map(\.text)
-            texts.insert(contentsOf: turnTexts, at: 0)
-            if i == allTurns.startIndex { break }
-            i = allTurns.index(before: i)
-        }
-        return texts.joined(separator: "\n\n")
+    /// Text content of this turn for copy.
+    private var turnText: String {
+        return turn.contentBlocks
+            .filter { if case .text = $0.kind { return true }; return false }
+            .map(\.text).joined(separator: "\n")
     }
 
     var body: some View {
@@ -258,9 +359,10 @@ struct ChatMessageView: View {
                     }
                 }
                 .frame(maxWidth: chatMaxWidth, alignment: turn.role == "user" ? .trailing : .leading)
+                .contentShape(Rectangle())
+                .onHover { isHovered = $0 }
                 Spacer(minLength: 0)
             }
-            .onHover { isHovered = $0 }
         }
     }
 
@@ -350,19 +452,11 @@ struct ChatMessageView: View {
     private func pairToolResults() -> [PairedBlock] {
         var paired = turn.contentBlocks.map { PairedBlock(block: $0) }
 
-        if let nextTurn = allTurns.first(where: { $0.index == turn.index + 1 && $0.role == "user" }) {
-            let results = nextTurn.contentBlocks.filter {
-                if case .toolResult = $0.kind { return true }
-                return false
-            }
-            for result in results {
-                if case .toolResult(_, let toolUseId) = result.kind, let useId = toolUseId {
-                    if let idx = paired.firstIndex(where: {
-                        if case .toolUse(_, _, let id) = $0.block.kind { return id == useId }
-                        return false
-                    }) {
-                        paired[idx].resultBlock = result
-                    }
+        // Use precomputed tool result map (no allTurns lookup needed)
+        for (i, block) in turn.contentBlocks.enumerated() {
+            if case .toolUse(_, _, let id) = block.kind, let useId = id {
+                if let result = toolResultMap[useId] {
+                    paired[i].resultBlock = result
                 }
             }
         }
@@ -372,56 +466,99 @@ struct ChatMessageView: View {
 
     // MARK: Actions (below message, visible on hover)
 
+    @State private var showCopyCheck = false
+    @State private var showForkConfirm = false
+
     private var messageActions: some View {
-        HStack(spacing: 8) {
-            Button {
-                onCopy?(groupText)
-            } label: {
-                Image(systemName: "doc.on.doc")
-                    .font(.system(size: 11))
+        HStack(spacing: 4) {
+            // Copy
+            ActionButton(
+                icon: showCopyCheck ? "checkmark" : "doc.on.doc",
+                help: "Copy text"
+            ) {
+                onCopy?(turnText)
+                showCopyCheck = true
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(2))
+                    showCopyCheck = false
+                }
             }
-            .buttonStyle(.borderless)
-            .help("Copy text")
 
+            // Checkpoint
             if let onCheckpoint {
-                Button { onCheckpoint(turn) } label: {
-                    Image(systemName: "clock.arrow.circlepath")
-                        .font(.system(size: 11))
+                ActionButton(icon: "clock.arrow.circlepath", help: "Checkpoint") {
+                    onCheckpoint(turn)
                 }
-                .buttonStyle(.borderless)
-                .help("Checkpoint")
             }
 
-            if let onFork {
-                Button { onFork() } label: {
-                    Image(systemName: "arrow.branch")
-                        .font(.system(size: 11))
+            // Fork (with confirmation)
+            if onFork != nil {
+                ActionButton(icon: "arrow.branch", help: "Fork") {
+                    showForkConfirm = true
                 }
-                .buttonStyle(.borderless)
-                .help("Fork")
+                .alert("Fork from here?", isPresented: $showForkConfirm) {
+                    Button("Fork", role: .destructive) { onFork?() }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("This will create a new session branching from this point.")
+                }
             }
         }
-        .foregroundStyle(.secondary)
         .opacity(isHovered ? 1 : 0)
-        // Always takes space (height) even when invisible
         .frame(height: 20)
+    }
+}
+
+// MARK: - Action Button (with hover/active feedback)
+
+private struct ActionButton: View {
+    let icon: String
+    var help: String = ""
+    let action: () -> Void
+    @State private var isHovered = false
+    @State private var isPressed = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 11))
+                .foregroundStyle(isPressed ? .primary : .secondary)
+                .frame(width: 24, height: 20)
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(isPressed ? Color.primary.opacity(0.1) : (isHovered ? Color.primary.opacity(0.06) : Color.clear))
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in isPressed = true }
+                .onEnded { _ in isPressed = false }
+        )
+        .help(help)
     }
 }
 
 // MARK: - Tool Call Card
 
-struct ToolCallCard: View {
+struct ToolCallCard: View, Equatable {
     let name: String
     let displayText: String
     let rawInputJSON: Data?
     var resultText: String?
     @State private var isExpanded = false
 
+    nonisolated static func == (lhs: ToolCallCard, rhs: ToolCallCard) -> Bool {
+        lhs.name == rhs.name && lhs.displayText == rhs.displayText && lhs.rawInputJSON == rhs.rawInputJSON
+    }
+
     private func parseSummary() -> (action: String, target: String) {
         let path = extractField("file_path").map { ($0 as NSString).lastPathComponent } ?? ""
         switch name {
-        case "Edit": return ("Edited", path)
-        case "Write": return ("Created", path)
+        case "Edit": return ("Edit", path)
+        case "Write": return ("Write", path)
         case "Read": return ("Read", path)
         case "Bash":
             let cmd = extractField("command") ?? extractField("description") ?? ""
@@ -462,7 +599,8 @@ struct ToolCallCard: View {
                 }
                 .font(.app(.callout))
                 .foregroundStyle(.primary)
-                .padding(.horizontal, 10)
+                .padding(.horizontal, 8)
+                .padding(.leading, 0)
                 .padding(.vertical, 7)
                 .contentShape(Rectangle())
             }
@@ -470,7 +608,8 @@ struct ToolCallCard: View {
 
             if isExpanded {
                 expandedContent
-                    .padding(.horizontal, 10)
+                    .padding(.horizontal, 8)
+                    .padding(.leading, 0)
                     .padding(.bottom, 8)
                     .frame(maxWidth: chatMaxWidth)
             }
@@ -701,7 +840,7 @@ struct ChatInputBar: View {
             )
             .animation(.easeInOut(duration: 0.15), value: isFocused)
         }
-        .frame(maxWidth: chatMaxWidth + 80)
+        .frame(maxWidth: chatMaxWidth + 40)
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 16)
         .padding(.top, 1)
@@ -734,8 +873,8 @@ struct ChatInputBar: View {
 private extension String {
     /// Quick check for markdown syntax to avoid expensive Markdown() rendering for plain text.
     var containsMarkdown: Bool {
-        contains("#") || contains("**") || contains("*") || contains("`") ||
-        contains("[") || contains("- ") || contains("1. ") || contains("> ")
+        contains("**") || contains("```") || contains("# ") ||
+        contains("[") || contains("- ") || contains("> ")
     }
 }
 

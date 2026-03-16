@@ -75,7 +75,7 @@ struct TranscriptReaderTests {
         #expect(turns[0].textPreview == "[tool: Read]")
     }
 
-    @Test("Line numbers are correct")
+    @Test("Line numbers (byte offsets) are stable and increasing")
     func lineNumbers() async throws {
         let dir = try makeTempDir()
         defer { cleanup(dir) }
@@ -88,8 +88,8 @@ struct TranscriptReaderTests {
         ].joined(separator: "\n").write(toFile: path, atomically: true, encoding: .utf8)
 
         let turns = try await TranscriptReader.readTurns(from: path)
-        #expect(turns[0].lineNumber == 2) // first message line is line 2
-        #expect(turns[1].lineNumber == 3)
+        #expect(turns[0].lineNumber > 0) // byte offset, not sequential
+        #expect(turns[1].lineNumber > turns[0].lineNumber) // strictly increasing
     }
 
     // MARK: - Rich content block tests
@@ -332,5 +332,78 @@ struct TranscriptReaderTests {
         #expect(turns.count == 1)
         #expect(turns[0].role == "assistant")
         #expect(turns[0].textPreview == "file contents here")
+    }
+
+    // MARK: - Tail reading stability tests
+
+    @Test("readTail returns stable lineNumbers (byte offsets) across reloads")
+    func stableLineNumbers() async throws {
+        let dir = try makeTempDir()
+        defer { cleanup(dir) }
+
+        let path = (dir as NSString).appendingPathComponent("test.jsonl")
+        try [
+            #"{"type":"user","sessionId":"s1","message":{"role":"user","content":"hello"}}"#,
+            #"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"world"}]}}"#,
+            #"{"type":"user","sessionId":"s1","message":{"role":"user","content":"how are you"}}"#,
+            #"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"fine"}]}}"#,
+        ].joined(separator: "\n").write(toFile: path, atomically: true, encoding: .utf8)
+
+        let result1 = try await TranscriptReader.readTail(from: path, maxTurns: 10)
+        let result2 = try await TranscriptReader.readTail(from: path, maxTurns: 10)
+
+        // Same file, same content → same lineNumbers
+        #expect(result1.turns.count == result2.turns.count)
+        for (t1, t2) in zip(result1.turns, result2.turns) {
+            #expect(t1.lineNumber == t2.lineNumber, "lineNumber should be stable across reloads")
+        }
+    }
+
+    @Test("readTail appending new turns does not duplicate existing ones")
+    func noDuplicatesOnAppend() async throws {
+        let dir = try makeTempDir()
+        defer { cleanup(dir) }
+
+        let path = (dir as NSString).appendingPathComponent("test.jsonl")
+        let line1 = #"{"type":"user","sessionId":"s1","message":{"role":"user","content":"hello"}}"#
+        let line2 = #"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"world"}]}}"#
+        try [line1, line2].joined(separator: "\n").write(toFile: path, atomically: true, encoding: .utf8)
+
+        let result1 = try await TranscriptReader.readTail(from: path, maxTurns: 10)
+        #expect(result1.turns.count == 2)
+        let lastLineNumber = result1.turns.last!.lineNumber
+
+        // Append a new turn
+        let line3 = #"{"type":"user","sessionId":"s1","message":{"role":"user","content":"more"}}"#
+        let handle = try FileHandle(forWritingTo: URL(fileURLWithPath: path))
+        handle.seekToEndOfFile()
+        handle.write(Data(("\n" + line3).utf8))
+        try handle.close()
+
+        let result2 = try await TranscriptReader.readTail(from: path, maxTurns: 10)
+        // New turns should have lineNumber > lastLineNumber
+        let newTurns = result2.turns.filter { $0.lineNumber > lastLineNumber }
+        #expect(newTurns.count == 1, "Should find exactly 1 new turn")
+        #expect(newTurns[0].textPreview == "more")
+    }
+
+    @Test("readTail with maxTurns limits results from bottom")
+    func tailLimiting() async throws {
+        let dir = try makeTempDir()
+        defer { cleanup(dir) }
+
+        let path = (dir as NSString).appendingPathComponent("test.jsonl")
+        var lines: [String] = []
+        for i in 0..<20 {
+            lines.append(#"{"type":"user","sessionId":"s1","message":{"role":"user","content":"msg \#(i)"}}"#)
+            lines.append(#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"reply \#(i)"}]}}"#)
+        }
+        try lines.joined(separator: "\n").write(toFile: path, atomically: true, encoding: .utf8)
+
+        let result = try await TranscriptReader.readTail(from: path, maxTurns: 4)
+        #expect(result.turns.count == 4)
+        #expect(result.hasMore == true)
+        // Should be the LAST 4 turns
+        #expect(result.turns.last!.textPreview == "reply 19")
     }
 }

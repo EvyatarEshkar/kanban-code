@@ -101,6 +101,7 @@ struct CardDetailView: View {
     @State private var hasMoreTurns = false
     @State private var chatDraftText = ""
     @State private var chatDraftImages: [Data] = []
+    @State private var chatPendingMessage: String?
     @State private var isLoadingMore = false
     @Binding var selectedTab: DetailTab
     @State private var showRenameSheet = false
@@ -299,9 +300,9 @@ struct CardDetailView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .kanbanCodeHistoryChanged)) { _ in
             guard selectedTab == .history || (selectedTab == .terminal && preferChatView) else { return }
-            // Debounce: only reload if >0.5s since last reload
+            // Debounce: only reload if >0.2s since last reload
             let now = Date()
-            guard now.timeIntervalSince(lastReloadTime) > 0.5 else { return }
+            guard now.timeIntervalSince(lastReloadTime) > 0.2 else { return }
             lastReloadTime = now
             Task { await loadHistory() }
         }
@@ -627,7 +628,12 @@ struct CardDetailView: View {
                 if let prompts = card.link.queuedPrompts, !prompts.isEmpty {
                     QueuedPromptsBar(
                         prompts: prompts,
-                        onSendNow: { promptId in onSendQueuedPrompt(promptId) },
+                        onSendNow: { promptId in
+                            if preferChatView, let prompt = card.link.queuedPrompts?.first(where: { $0.id == promptId }) {
+                                chatPendingMessage = prompt.body
+                            }
+                            onSendQueuedPrompt(promptId)
+                        },
                         onEdit: { prompt in
                             onEditingQueuedPrompt(prompt.id)
                             queuedPromptItem = QueuedPromptItem(existingPrompt: prompt)
@@ -666,7 +672,8 @@ struct CardDetailView: View {
                                 showCheckpointConfirm = true
                             },
                             draftText: $chatDraftText,
-                            draftImages: $chatDraftImages
+                            draftImages: $chatDraftImages,
+                            pendingMessage: $chatPendingMessage
                         )
                         .task(id: "chatview-\(card.id)") {
                             await loadHistory()
@@ -1916,16 +1923,14 @@ struct CardDetailView: View {
     private func loadMoreHistory() async {
         guard hasMoreTurns, !isLoadingMore else { return }
         guard let path = card.link.sessionLink?.sessionPath ?? card.session?.jsonlPath else { return }
-        guard let firstTurn = turns.first else { return }
 
         isLoadingMore = true
-        let rangeStart = max(0, firstTurn.index - Self.pageSize)
-        let rangeEnd = firstTurn.index
-
+        // Load more by requesting a bigger tail — doubles the current window
+        let newCount = turns.count + (preferChatView ? Self.chatPageSize : Self.pageSize)
         do {
-            let earlier = try await TranscriptReader.readRange(from: path, turnRange: rangeStart..<rangeEnd)
-            turns = earlier + turns
-            hasMoreTurns = rangeStart > 0
+            let result = try await TranscriptReader.readTail(from: path, maxTurns: newCount)
+            turns = result.turns
+            hasMoreTurns = result.hasMore
         } catch {
             // Silently fail
         }
@@ -1966,12 +1971,34 @@ struct CardDetailView: View {
         let source = Self.makeHistorySource(fd: fd)
         historyWatcherSource = source
 
-        // Periodic poll as fallback (every 3s) in case DispatchSource misses events
+        // Periodic poll as fallback — handles DispatchSource dying (inode changes
+        // from atomic writes) and tab switches. Checks file mtime to avoid
+        // unnecessary reloads.
         historyPollTask = Task { @MainActor in
+            var lastMtime: Date = .distantPast
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(3))
-                guard !Task.isCancelled, selectedTab == .history else { break }
-                await loadHistory()
+                try? await Task.sleep(for: .seconds(2))
+                guard !Task.isCancelled else { break }
+                // Continue polling even if tab changed — don't break, just skip
+                guard selectedTab == .history || (selectedTab == .terminal && preferChatView) else { continue }
+
+                // Only reload if file was actually modified
+                if let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+                   let mtime = attrs[.modificationDate] as? Date,
+                   mtime > lastMtime {
+                    lastMtime = mtime
+                    await loadHistory()
+
+                    // Re-open DispatchSource if inode changed (atomic write detection)
+                    let newFd = open(path, O_EVTONLY)
+                    if newFd >= 0 && newFd != historyWatcherFD {
+                        historyWatcherSource?.cancel()
+                        historyWatcherFD = newFd
+                        historyWatcherSource = Self.makeHistorySource(fd: newFd)
+                    } else if newFd >= 0 && newFd == historyWatcherFD {
+                        close(newFd) // same fd, don't leak
+                    }
+                }
             }
         }
     }

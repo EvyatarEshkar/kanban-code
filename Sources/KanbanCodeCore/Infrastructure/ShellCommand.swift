@@ -45,49 +45,63 @@ public enum ShellCommand {
         }
     }()
 
-    /// Run a command and capture its output.
+    /// Background queue for blocking process I/O — never touches the main thread.
+    private static let processQueue = DispatchQueue(label: "kanban.shell", qos: .userInitiated, attributes: .concurrent)
+
+    /// Run a command and capture its output. All blocking I/O runs on a background
+    /// dispatch queue so the Swift cooperative thread pool (and main thread) stays free.
     public static func run(
         _ executable: String,
         arguments: [String] = [],
         currentDirectory: String? = nil,
         stdin: String? = nil
     ) async throws -> Result {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = arguments
-        process.environment = userEnvironment
+        let env = userEnvironment
+        return try await withCheckedThrowingContinuation { continuation in
+            processQueue.async {
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: executable)
+                process.arguments = arguments
+                process.environment = env
 
-        if let dir = currentDirectory {
-            process.currentDirectoryURL = URL(fileURLWithPath: dir)
+                if let dir = currentDirectory {
+                    process.currentDirectoryURL = URL(fileURLWithPath: dir)
+                }
+
+                let stdoutPipe = Pipe()
+                let stderrPipe = Pipe()
+                process.standardOutput = stdoutPipe
+                process.standardError = stderrPipe
+
+                if let stdin, let data = stdin.data(using: .utf8) {
+                    let stdinPipe = Pipe()
+                    process.standardInput = stdinPipe
+                    stdinPipe.fileHandleForWriting.write(data)
+                    stdinPipe.fileHandleForWriting.closeFile()
+                }
+
+                do {
+                    try process.run()
+                } catch {
+                    continuation.resume(throwing: error)
+                    return
+                }
+
+                // Read pipe data BEFORE waitUntilExit to avoid deadlock when output
+                // exceeds the pipe buffer (~64KB).
+                let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+                let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+
+                process.waitUntilExit()
+
+                let result = Result(
+                    exitCode: process.terminationStatus,
+                    stdout: String(data: stdoutData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
+                    stderr: String(data: stderrData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                )
+                continuation.resume(returning: result)
+            }
         }
-
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-
-        if let stdin, let data = stdin.data(using: .utf8) {
-            let stdinPipe = Pipe()
-            process.standardInput = stdinPipe
-            stdinPipe.fileHandleForWriting.write(data)
-            stdinPipe.fileHandleForWriting.closeFile()
-        }
-
-        try process.run()
-
-        // Read pipe data BEFORE waitUntilExit to avoid deadlock when output
-        // exceeds the pipe buffer (~64KB). If we wait first, the child process
-        // blocks on write and we block on exit — classic pipe deadlock.
-        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-
-        process.waitUntilExit()
-
-        return Result(
-            exitCode: process.terminationStatus,
-            stdout: String(data: stdoutData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
-            stderr: String(data: stderrData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        )
     }
 
     /// Check if a command is available on the system.

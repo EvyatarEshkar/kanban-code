@@ -83,20 +83,73 @@ public final class TmuxAdapter: TmuxManagerPort, @unchecked Sendable {
         }
     }
 
-    public func sendPrompt(to sessionName: String, text: String) async throws {
-        // Send text literally (-l avoids interpreting special keys)
-        let _ = try await ShellCommand.run(
+    /// Exit tmux copy/scroll mode if active, so send-keys reaches the application.
+    public func exitScrollMode(sessionName: String) async throws {
+        // Send 'q' to exit copy mode. If not in copy mode, 'q' is harmless
+        // (Claude Code ignores it, Gemini CLI ignores it at the prompt).
+        // We use cancel-copy-mode which is a no-op if not in copy mode.
+        let _ = try? await ShellCommand.run(
             tmuxPath,
-            arguments: ["send-keys", "-t", sessionName, "-l", text]
-        )
-        // Press Enter to submit
-        let _ = try await ShellCommand.run(
-            tmuxPath,
-            arguments: ["send-keys", "-t", sessionName, "Enter"]
+            arguments: ["send-keys", "-t", sessionName, "-X", "cancel"]
         )
     }
 
+    public func sendPrompt(to sessionName: String, text: String) async throws {
+        try await exitScrollMode(sessionName: sessionName)
+        // Use bracketed paste for reliability — send-keys -l can fail with long text
+        // because Claude Code shows "[Pasted text #N +M lines]" and needs Enter.
+        let tempFile = "/tmp/kanban-code-send-\(ProcessInfo.processInfo.processIdentifier).txt"
+        try text.write(toFile: tempFile, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(atPath: tempFile) }
+
+        let _ = try await ShellCommand.run(
+            tmuxPath, arguments: ["load-buffer", tempFile]
+        )
+        let _ = try await ShellCommand.run(
+            tmuxPath, arguments: ["paste-buffer", "-p", "-t", sessionName]
+        )
+        // Press Enter to submit
+        let _ = try await ShellCommand.run(
+            tmuxPath, arguments: ["send-keys", "-t", sessionName, "Enter"]
+        )
+        // Verify the prompt was accepted — if text is still on the prompt line,
+        // send Enter again (Claude sometimes needs a moment to process the paste)
+        try await ensurePromptSent(sessionName: sessionName)
+    }
+
+    /// Poll pane output to verify the prompt was sent. If text remains on the
+    /// prompt line after Enter, send Enter again (up to 3 retries).
+    /// Checks for: [Pasted text...] indicator, or text after the ❯ prompt character.
+    private func ensurePromptSent(sessionName: String) async throws {
+        for _ in 0..<5 {
+            try await Task.sleep(for: .milliseconds(500))
+            let output = try await capturePane(sessionName: sessionName)
+
+            // Check if the prompt line still has unsent text
+            let hasUnsentText: Bool
+            if output.contains("[Pasted text") || output.contains("[Pasted Text") {
+                hasUnsentText = true
+            } else if let promptRange = output.range(of: "\u{276F}") {
+                // Check if there's non-whitespace text after the ❯ prompt on the same line
+                let afterPrompt = output[promptRange.upperBound...]
+                let sameLine = afterPrompt.prefix(while: { $0 != "\n" })
+                hasUnsentText = !sameLine.trimmingCharacters(in: .whitespaces).isEmpty
+            } else {
+                hasUnsentText = false
+            }
+
+            if hasUnsentText {
+                let _ = try await ShellCommand.run(
+                    tmuxPath, arguments: ["send-keys", "-t", sessionName, "Enter"]
+                )
+            } else {
+                return
+            }
+        }
+    }
+
     public func pastePrompt(to sessionName: String, text: String) async throws {
+        try await exitScrollMode(sessionName: sessionName)
         // Use load-buffer + paste-buffer -p to bypass readline special char handling.
         // The -p flag wraps the paste in bracketed paste codes (\e[200~ … \e[201~),
         // telling the application (Gemini CLI) to treat the text literally and not
@@ -115,6 +168,7 @@ public final class TmuxAdapter: TmuxManagerPort, @unchecked Sendable {
         let _ = try await ShellCommand.run(
             tmuxPath, arguments: ["send-keys", "-t", sessionName, "Enter"]
         )
+        try await ensurePromptSent(sessionName: sessionName)
     }
 
     public func capturePane(sessionName: String) async throws -> String {
