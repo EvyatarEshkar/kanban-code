@@ -104,6 +104,7 @@ struct ChatView: View {
             ChatInputBar(
                 assistant: assistant,
                 isReady: !isAssistantBusy,
+                cardId: tmuxSessionName ?? "",
                 onSend: { text, images in
                     pendingMessage = text
                     onSendPrompt(text, images)
@@ -143,6 +144,7 @@ private struct ChatMessageList: View {
     var onLoadMore: (() -> Void)?
     var onFork: (() -> Void)?
     var onCheckpoint: ((ConversationTurn) -> Void)?
+    var onSendAnswer: ((String) -> Void)?
 
     @State private var isAtBottom = true
     @State private var hasNewMessages = false
@@ -175,7 +177,8 @@ private struct ChatMessageList: View {
                                 NSPasteboard.general.setString(text, forType: .string)
                             },
                             onFork: onFork,
-                            onCheckpoint: onCheckpoint
+                            onCheckpoint: onCheckpoint,
+                            onSendAnswer: onSendAnswer
                         )
                         .equatable()
                         .id(turn.lineNumber)
@@ -382,6 +385,7 @@ struct ChatMessageView: View, Equatable {
     var onCopy: ((String) -> Void)?
     var onFork: (() -> Void)?
     var onCheckpoint: ((ConversationTurn) -> Void)?
+    var onSendAnswer: ((String) -> Void)?
     @State private var isHovered = false
 
     nonisolated static func == (lhs: ChatMessageView, rhs: ChatMessageView) -> Bool {
@@ -516,12 +520,12 @@ struct ChatMessageView: View, Equatable {
                         .italic()
                         .foregroundStyle(.tertiary)
                 case .planModeExit(let plan):
-                    PlanModeExitCard(plan: plan, resultText: paired.resultBlock?.text)
+                    PlanModeExitCard(plan: plan, resultText: paired.resultBlock?.text, onAnswer: onSendAnswer)
                 case .askUserQuestion(let questions, _):
                     AskUserQuestionCard(
                         questions: questions,
                         resultText: paired.resultBlock?.text,
-                        onAnswer: { answer in onFork?() /* TODO: wire onAnswer */ }
+                        onAnswer: onSendAnswer
                     )
                 case .agentCall(let description, let subagentType, _):
                     AgentCallCard(
@@ -860,7 +864,10 @@ struct ThinkingCard: View {
 struct PlanModeExitCard: View {
     let plan: String
     let resultText: String?
+    var onAnswer: ((String) -> Void)?
     @State private var isExpanded = false
+
+    private var isAnswered: Bool { resultText != nil }
 
     private var approvalStatus: String? {
         guard let r = resultText else { return nil }
@@ -870,7 +877,7 @@ struct PlanModeExitCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 8) {
             Button { isExpanded.toggle() } label: {
                 HStack(spacing: 5) {
                     Text("Plan").fontWeight(.bold)
@@ -886,6 +893,13 @@ struct PlanModeExitCard: View {
                                 in: Capsule()
                             )
                             .foregroundStyle(status == "Approved" ? .green : .red)
+                    } else if !isAnswered {
+                        Text("Awaiting approval")
+                            .font(.app(.caption))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Color.orange.opacity(0.15), in: Capsule())
+                            .foregroundStyle(.orange)
                     }
                     Image(systemName: "chevron.right")
                         .font(.system(size: 10))
@@ -905,7 +919,33 @@ struct PlanModeExitCard: View {
                     .markdownTheme(chatMarkdownTheme)
                     .textSelection(.enabled)
                     .padding(.horizontal, 8)
-                    .padding(.bottom, 8)
+                    .padding(.bottom, 4)
+            }
+
+            // Interactive approval when waiting
+            if !isAnswered {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(Array(planOptions.enumerated()), id: \.offset) { idx, option in
+                        Button {
+                            onAnswer?(String(idx + 1))
+                        } label: {
+                            HStack(spacing: 8) {
+                                Text("\(idx + 1).")
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 20, alignment: .trailing)
+                                Text(option)
+                            }
+                            .font(.app(.callout))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(8)
+                            .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.03)))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.bottom, 8)
             }
         }
         .background(
@@ -913,6 +953,12 @@ struct PlanModeExitCard: View {
                 .fill(Color.primary.opacity(0.04))
                 .padding(.leading, -8)
         )
+    }
+
+    private var planOptions: [String] {
+        ["Yes, clear context and bypass permissions",
+         "Yes, and bypass permissions",
+         "Yes, manually approve edits"]
     }
 }
 
@@ -1070,6 +1116,7 @@ struct WorkingIndicator: View {
 struct ChatInputBar: View {
     let assistant: CodingAssistant
     let isReady: Bool
+    var cardId: String = ""
     var onSend: (String, [String]) -> Void = { _, _ in }
     var onQueuePrompt: ((String, Bool, [String]) -> Void)?
 
@@ -1121,6 +1168,7 @@ struct ChatInputBar: View {
                     font: .systemFont(ofSize: 13),
                     placeholder: "Message \(assistant.displayName)...",
                     maxHeight: 160,
+                    identity: cardId,
                     onSubmit: send,
                     onCmdSubmit: onQueuePrompt != nil ? { showQueueDialog = true } : nil,
                     onImagePaste: { data in pastedImages.append(data) }

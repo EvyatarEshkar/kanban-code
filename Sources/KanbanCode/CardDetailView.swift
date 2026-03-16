@@ -317,6 +317,7 @@ struct CardDetailView: View {
             isLoadingMore = false
             hasMoreTurns = false
             checkpointMode = false
+            chatPendingMessage = nil
             prBody = nil
             isLoadingPRBody = false
             selectedTerminalSession = nil

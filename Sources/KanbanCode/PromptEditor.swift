@@ -8,6 +8,8 @@ struct PromptEditor: NSViewRepresentable {
     var font: NSFont = .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
     var placeholder: String = ""
     var maxHeight: CGFloat = 400
+    /// Identity tag — when this changes, the text view is force-updated regardless of focus.
+    var identity: String = ""
     var onSubmit: () -> Void = {}
     var onCmdSubmit: (() -> Void)?
     var onImagePaste: ((Data) -> Void)?
@@ -51,13 +53,15 @@ struct PromptEditor: NSViewRepresentable {
 
     func updateNSView(_ scrollView: PromptEditorScrollView, context: Context) {
         guard let textView = scrollView.documentView as? SubmitTextView else { return }
-        // Only push text from binding when user is NOT actively editing.
-        // When the user types, textDidChange pushes to the binding. If a parent
-        // re-render (e.g. card reconciliation) calls updateNSView before SwiftUI
-        // processes the binding update, `text` can be stale. Setting textView.string
-        // with stale text resets the cursor to the end.
+        // Force update when the identity changes (e.g. switched to a different card).
+        let identityChanged = context.coordinator.lastIdentity != identity
+        if identityChanged {
+            context.coordinator.lastIdentity = identity
+        }
+        // Only push text from binding when user is NOT actively editing,
+        // OR when the identity changed (card switch — must show new card's draft).
         let isEditing = textView.window?.firstResponder === textView
-        if textView.string != text && (!isEditing || text.isEmpty) {
+        if textView.string != text && (!isEditing || text.isEmpty || identityChanged) {
             textView.string = text
             textView.needsDisplay = true // redraw placeholder if cleared
         }
@@ -79,10 +83,12 @@ struct PromptEditor: NSViewRepresentable {
     @MainActor class Coordinator: NSObject, NSTextViewDelegate {
         var parent: PromptEditor
         var placeholder: String = ""
+        var lastIdentity: String = ""
 
         init(_ parent: PromptEditor) {
             self.parent = parent
             self.placeholder = parent.placeholder
+            self.lastIdentity = parent.identity
         }
 
         func textDidChange(_ notification: Notification) {
