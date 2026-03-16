@@ -363,6 +363,15 @@ private struct ChatMessageList: View {
                 }
             }
             .animation(.easeInOut(duration: 0.2), value: hasNewMessages)
+            .onReceive(NotificationCenter.default.publisher(for: .chatCardExpanded)) { _ in
+                if isAtBottom {
+                    // Immediate + delayed attempts to catch layout changes
+                    proxy.scrollTo("bottom-spacer", anchor: .bottom)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        proxy.scrollTo("bottom-spacer", anchor: .bottom)
+                    }
+                }
+            }
         }
     }
 
@@ -883,7 +892,10 @@ struct ToolCallCard: View, Equatable {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button { isExpanded.toggle() } label: {
+            Button {
+                isExpanded.toggle()
+                if isExpanded { NotificationCenter.default.post(name: .chatCardExpanded, object: nil) }
+            } label: {
                 HStack(spacing: 5) {
                     let (action, target, additions, deletions, replaceAll) = parseSummary()
                     Text(action).fontWeight(.bold)
@@ -1025,7 +1037,7 @@ struct ThinkingCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button { isExpanded.toggle() } label: {
+            Button { isExpanded.toggle(); if isExpanded { NotificationCenter.default.post(name: .chatCardExpanded, object: nil) } } label: {
                 HStack(spacing: 4) {
                     Text("Thought").fontWeight(.bold)
                     Image(systemName: "chevron.right")
@@ -1068,7 +1080,7 @@ struct PlanModeExitCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Button { isExpanded.toggle() } label: {
+            Button { isExpanded.toggle(); if isExpanded { NotificationCenter.default.post(name: .chatCardExpanded, object: nil) } } label: {
                 HStack(spacing: 5) {
                     Text("Plan").fontWeight(.bold)
                     if let status = approvalStatus {
@@ -1163,7 +1175,7 @@ struct AgentCallCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button { isExpanded.toggle() } label: {
+            Button { isExpanded.toggle(); if isExpanded { NotificationCenter.default.post(name: .chatCardExpanded, object: nil) } } label: {
                 HStack(spacing: 5) {
                     Text("Agent").fontWeight(.bold)
                     if let type = subagentType {
