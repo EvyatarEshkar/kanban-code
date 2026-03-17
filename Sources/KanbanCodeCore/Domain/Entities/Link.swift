@@ -105,6 +105,20 @@ public struct IssueLink: Codable, Sendable, Equatable {
     }
 }
 
+/// A browser tab's persisted state (URL + title). Live WKWebView instances
+/// are held separately in BrowserTabCache on the UI side.
+public struct BrowserTabInfo: Codable, Sendable, Equatable, Identifiable {
+    public let id: String
+    public var url: String
+    public var title: String?
+
+    public init(id: String = "browser-\(UUID().uuidString)", url: String, title: String? = nil) {
+        self.id = id
+        self.url = url
+        self.title = title
+    }
+}
+
 /// A prompt queued to be sent to a Claude session.
 public struct QueuedPrompt: Codable, Sendable, Equatable, Identifiable {
     public let id: String
@@ -159,6 +173,7 @@ public struct Link: Identifiable, Codable, Sendable {
     public var prLinks: [PRLink]
     public var issueLink: IssueLink?
     public var queuedPrompts: [QueuedPrompt]?
+    public var browserTabs: [BrowserTabInfo]?
 
     /// Branches discovered by scanning the conversation for `git push` commands.
     /// nil = not yet scanned; empty = scanned but no branches found.
@@ -285,6 +300,7 @@ public struct Link: Identifiable, Codable, Sendable {
         prLinks: [PRLink] = [],
         issueLink: IssueLink? = nil,
         queuedPrompts: [QueuedPrompt]? = nil,
+        browserTabs: [BrowserTabInfo]? = nil,
         assistant: CodingAssistant? = nil,
         isRemote: Bool = false,
         isLaunching: Bool? = nil,
@@ -311,6 +327,7 @@ public struct Link: Identifiable, Codable, Sendable {
         self.prLinks = prLinks
         self.issueLink = issueLink
         self.queuedPrompts = queuedPrompts
+        self.browserTabs = browserTabs
         self.assistant = assistant
         self.isRemote = isRemote
         self.isLaunching = isLaunching
@@ -327,7 +344,7 @@ public struct Link: Identifiable, Codable, Sendable {
         case manualOverrides, manuallyArchived, source, promptBody, promptImagePaths, isRemote, isLaunching, sortOrder
         case discoveredBranches, discoveredRepos, assistant
         // Typed links (new nested format)
-        case sessionLink, tmuxLink, worktreeLink, prLinks, issueLink, queuedPrompts
+        case sessionLink, tmuxLink, worktreeLink, prLinks, issueLink, queuedPrompts, browserTabs
         // Old format keys (for reading legacy format)
         case prLink
         case sessionId, sessionPath, worktreePath, worktreeBranch
@@ -417,6 +434,7 @@ public struct Link: Identifiable, Codable, Sendable {
         }
 
         queuedPrompts = try c.decodeIfPresent([QueuedPrompt].self, forKey: .queuedPrompts)
+        browserTabs = try c.decodeIfPresent([BrowserTabInfo].self, forKey: .browserTabs)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -451,6 +469,7 @@ public struct Link: Identifiable, Codable, Sendable {
         }
         try c.encodeIfPresent(issueLink, forKey: .issueLink)
         try c.encodeIfPresent(queuedPrompts, forKey: .queuedPrompts)
+        try c.encodeIfPresent(browserTabs, forKey: .browserTabs)
     }
 }
 

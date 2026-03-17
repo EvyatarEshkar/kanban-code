@@ -496,6 +496,15 @@ struct ContentView: View {
                     orchestrator.markPromptEditing(promptId)
                 }
             },
+            onAddBrowserTab: { tabId, url in
+                store.dispatch(.addBrowserTab(cardId: card.id, tabId: tabId, url: url))
+            },
+            onRemoveBrowserTab: { tabId in
+                store.dispatch(.removeBrowserTab(cardId: card.id, tabId: tabId))
+            },
+            onUpdateBrowserTab: { tabId, url, title in
+                store.dispatch(.updateBrowserTab(cardId: card.id, tabId: tabId, url: url, title: title))
+            },
             onDiscover: {
                 Task {
                     store.dispatch(.setBusy(cardId: card.id, busy: true))
@@ -904,6 +913,9 @@ struct ContentView: View {
                 // Register TerminalCache relay for KanbanCodeCore effects
                 TerminalCacheRelay.removeHandler = { name in
                     TerminalCache.shared.remove(name)
+                }
+                BrowserTabCacheRelay.removeAllHandler = { cardId in
+                    BrowserTabCache.shared.removeAllForCard(cardId)
                 }
                 systemTray.setup(store: store)
                 await store.loadSettingsAndCache()

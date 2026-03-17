@@ -124,6 +124,9 @@ struct CardDetailView: View {
     var onSendQueuedPrompt: (String) -> Void = { _ in }
     var onReorderQueuedPrompts: ([String]) -> Void = { _ in }
     var onEditingQueuedPrompt: (String?) -> Void = { _ in } // promptId when editing, nil when done
+    var onAddBrowserTab: (String, String) -> Void = { _, _ in } // (tabId, url)
+    var onRemoveBrowserTab: (String) -> Void = { _ in } // tabId
+    var onUpdateBrowserTab: (String, String?, String?) -> Void = { _, _, _ in } // (tabId, url?, title?)
     var onDiscover: () -> Void = {}
     var onUpdatePrompt: (String, [String]?) -> Void = { _, _ in } // body, imagePaths
     var availableProjects: [(name: String, path: String)] = []
@@ -223,7 +226,7 @@ struct CardDetailView: View {
     @State private var terminalPaths: [String: String] = [:]  // sessionName → last path component
     @State private var pathPollTask: Task<Void, Never>?
 
-    // Browser tabs
+    // Browser tabs (live WKWebViews in BrowserTabCache, persisted URLs in link.browserTabs)
     @State private var browserTabs: [BrowserTab] = []
     @State private var selectedBrowserTabId: String?
 
@@ -234,7 +237,7 @@ struct CardDetailView: View {
 
     let sessionStore: SessionStore
 
-    init(card: KanbanCodeCard, sessionStore: SessionStore = ClaudeCodeSessionStore(), selectedTab: Binding<DetailTab>, onResume: @escaping () -> Void = {}, onRename: @escaping (String) -> Void = { _ in }, onFork: @escaping (_ keepWorktree: Bool) -> Void = { _ in }, onDismiss: @escaping () -> Void = {}, onUnlink: @escaping (Action.LinkType) -> Void = { _ in }, onAddBranch: @escaping (String) -> Void = { _ in }, onAddIssue: @escaping (Int) -> Void = { _ in }, onAddPR: @escaping (Int) -> Void = { _ in }, onCleanupWorktree: @escaping () -> Void = {}, canCleanupWorktree: Bool = true, onDeleteCard: @escaping () -> Void = {}, onCreateTerminal: @escaping () -> Void = {}, onKillTerminal: @escaping (String) -> Void = { _ in }, onRenameTerminal: @escaping (String, String) -> Void = { _, _ in }, onReorderTerminal: @escaping (String, String?) -> Void = { _, _ in }, onPRMerged: @escaping (Int) -> Void = { _ in }, onCancelLaunch: @escaping () -> Void = {}, onAddQueuedPrompt: @escaping (QueuedPrompt) -> Void = { _ in }, onUpdateQueuedPrompt: @escaping (String, String, Bool) -> Void = { _, _, _ in }, onRemoveQueuedPrompt: @escaping (String) -> Void = { _ in }, onSendQueuedPrompt: @escaping (String) -> Void = { _ in }, onReorderQueuedPrompts: @escaping ([String]) -> Void = { _ in }, onEditingQueuedPrompt: @escaping (String?) -> Void = { _ in }, onDiscover: @escaping () -> Void = {}, onUpdatePrompt: @escaping (String, [String]?) -> Void = { _, _ in }, availableProjects: [(name: String, path: String)] = [], onMoveToProject: @escaping (String) -> Void = { _ in }, onMoveToFolder: @escaping () -> Void = {}, enabledAssistants: [CodingAssistant] = [], onMigrateAssistant: @escaping (CodingAssistant) -> Void = { _ in }, actionsMenuProvider: ActionsMenuProvider? = nil, focusTerminal: Binding<Bool> = .constant(false), isExpanded: Binding<Bool> = .constant(false), isDroppingImage: Binding<Bool> = .constant(false)) {
+    init(card: KanbanCodeCard, sessionStore: SessionStore = ClaudeCodeSessionStore(), selectedTab: Binding<DetailTab>, onResume: @escaping () -> Void = {}, onRename: @escaping (String) -> Void = { _ in }, onFork: @escaping (_ keepWorktree: Bool) -> Void = { _ in }, onDismiss: @escaping () -> Void = {}, onUnlink: @escaping (Action.LinkType) -> Void = { _ in }, onAddBranch: @escaping (String) -> Void = { _ in }, onAddIssue: @escaping (Int) -> Void = { _ in }, onAddPR: @escaping (Int) -> Void = { _ in }, onCleanupWorktree: @escaping () -> Void = {}, canCleanupWorktree: Bool = true, onDeleteCard: @escaping () -> Void = {}, onCreateTerminal: @escaping () -> Void = {}, onKillTerminal: @escaping (String) -> Void = { _ in }, onRenameTerminal: @escaping (String, String) -> Void = { _, _ in }, onReorderTerminal: @escaping (String, String?) -> Void = { _, _ in }, onPRMerged: @escaping (Int) -> Void = { _ in }, onCancelLaunch: @escaping () -> Void = {}, onAddQueuedPrompt: @escaping (QueuedPrompt) -> Void = { _ in }, onUpdateQueuedPrompt: @escaping (String, String, Bool) -> Void = { _, _, _ in }, onRemoveQueuedPrompt: @escaping (String) -> Void = { _ in }, onSendQueuedPrompt: @escaping (String) -> Void = { _ in }, onReorderQueuedPrompts: @escaping ([String]) -> Void = { _ in }, onEditingQueuedPrompt: @escaping (String?) -> Void = { _ in }, onAddBrowserTab: @escaping (String, String) -> Void = { _, _ in }, onRemoveBrowserTab: @escaping (String) -> Void = { _ in }, onUpdateBrowserTab: @escaping (String, String?, String?) -> Void = { _, _, _ in }, onDiscover: @escaping () -> Void = {}, onUpdatePrompt: @escaping (String, [String]?) -> Void = { _, _ in }, availableProjects: [(name: String, path: String)] = [], onMoveToProject: @escaping (String) -> Void = { _ in }, onMoveToFolder: @escaping () -> Void = {}, enabledAssistants: [CodingAssistant] = [], onMigrateAssistant: @escaping (CodingAssistant) -> Void = { _ in }, actionsMenuProvider: ActionsMenuProvider? = nil, focusTerminal: Binding<Bool> = .constant(false), isExpanded: Binding<Bool> = .constant(false), isDroppingImage: Binding<Bool> = .constant(false)) {
         self.card = card
         self.sessionStore = sessionStore
         self.onResume = onResume
@@ -260,6 +263,9 @@ struct CardDetailView: View {
         self.onSendQueuedPrompt = onSendQueuedPrompt
         self.onReorderQueuedPrompts = onReorderQueuedPrompts
         self.onEditingQueuedPrompt = onEditingQueuedPrompt
+        self.onAddBrowserTab = onAddBrowserTab
+        self.onRemoveBrowserTab = onRemoveBrowserTab
+        self.onUpdateBrowserTab = onUpdateBrowserTab
         self.onDiscover = onDiscover
         self.onUpdatePrompt = onUpdatePrompt
         self.availableProjects = availableProjects
@@ -322,7 +328,7 @@ struct CardDetailView: View {
             isLoadingPRBody = false
             selectedTerminalSession = nil
             selectedBrowserTabId = nil
-            browserTabs = []
+            browserTabs = hydrateBrowserTabs()
             terminalGrabFocus = false
             // Reset tab to a valid one for this card (skip auto-focus)
             suppressTerminalFocus = true
@@ -675,9 +681,12 @@ struct CardDetailView: View {
 
                     // Globe button for new browser tab
                     Button {
-                        let tab = BrowserTab()
+                        let tabId = "browser-\(UUID().uuidString)"
+                        let defaultURL = "http://localhost:5560/"
+                        onAddBrowserTab(tabId, defaultURL)
+                        let tab = BrowserTabCache.shared.getOrCreate(cardId: card.id, tabId: tabId, url: URL(string: defaultURL)!)
                         browserTabs.append(tab)
-                        selectedBrowserTabId = tab.id
+                        selectedBrowserTabId = tabId
                         selectedTerminalSession = nil
                     } label: {
                         Image(systemName: "globe")
@@ -777,7 +786,9 @@ struct CardDetailView: View {
 
                         // Browser tab content — use opacity to preserve WKWebView state
                         ForEach(browserTabs, id: \.id) { tab in
-                            BrowserContentView(tab: tab)
+                            BrowserContentView(tab: tab, onNavigated: { tabId, url, title in
+                                onUpdateBrowserTab(tabId, url, title)
+                            })
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                                 .opacity(selectedBrowserTabId == tab.id ? 1 : 0)
                         }
@@ -859,9 +870,12 @@ struct CardDetailView: View {
                     }
                     .buttonStyle(.bordered)
                     Button {
-                        let tab = BrowserTab()
+                        let tabId = "browser-\(UUID().uuidString)"
+                        let defaultURL = "http://localhost:5560/"
+                        onAddBrowserTab(tabId, defaultURL)
+                        let tab = BrowserTabCache.shared.getOrCreate(cardId: card.id, tabId: tabId, url: URL(string: defaultURL)!)
                         browserTabs.append(tab)
-                        selectedBrowserTabId = tab.id
+                        selectedBrowserTabId = tabId
                         selectedTerminalSession = nil
                     } label: {
                         Label("New Browser", systemImage: "globe")
@@ -1165,10 +1179,22 @@ struct CardDetailView: View {
         .onHover { hoveredTab = $0 ? tab.id : (hoveredTab == tab.id ? nil : hoveredTab) }
     }
 
+    /// Hydrate live BrowserTab instances from persisted BrowserTabInfo in the link.
+    /// Creates or reuses WKWebViews via BrowserTabCache.
+    private func hydrateBrowserTabs() -> [BrowserTab] {
+        guard let savedTabs = card.link.browserTabs else { return [] }
+        return savedTabs.compactMap { tabInfo in
+            guard let url = URL(string: tabInfo.url) else { return nil }
+            return BrowserTabCache.shared.getOrCreate(cardId: card.id, tabId: tabInfo.id, url: url)
+        }
+    }
+
     /// Close a browser tab and fall back to the previous tab if it was selected.
     private func closeBrowserTab(_ tab: BrowserTab) {
         let wasSelected = selectedBrowserTabId == tab.id
+        BrowserTabCache.shared.remove(cardId: card.id, tabId: tab.id)
         browserTabs.removeAll { $0.id == tab.id }
+        onRemoveBrowserTab(tab.id)
 
         if wasSelected {
             if let last = browserTabs.last {

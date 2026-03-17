@@ -66,6 +66,11 @@ public actor EffectHandler {
                 }
             }
 
+        case .cleanupBrowserCache(let cardId):
+            await MainActor.run {
+                BrowserTabCacheRelay.removeAll(cardId: cardId)
+            }
+
         case .refreshDiscovery:
             // This is handled by the orchestrator, not here
             break
@@ -142,5 +147,15 @@ public enum TerminalCacheRelay {
 
     public static func remove(_ sessionName: String) {
         removeHandler?(sessionName)
+    }
+}
+
+/// Relay for BrowserTabCache cleanup from KanbanCodeCore (same pattern as TerminalCacheRelay).
+@MainActor
+public enum BrowserTabCacheRelay {
+    public static var removeAllHandler: ((String) -> Void)?
+
+    public static func removeAll(cardId: String) {
+        removeAllHandler?(cardId)
     }
 }

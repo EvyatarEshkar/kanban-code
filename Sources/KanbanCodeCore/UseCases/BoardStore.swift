@@ -211,6 +211,11 @@ public enum Action: Sendable {
     case sendQueuedPrompt(cardId: String, promptId: String)
     case reorderQueuedPrompts(cardId: String, promptIds: [String])
 
+    // Browser tabs
+    case addBrowserTab(cardId: String, tabId: String, url: String)
+    case removeBrowserTab(cardId: String, tabId: String)
+    case updateBrowserTab(cardId: String, tabId: String, url: String?, title: String?)
+
     // Async completions
     case launchCompleted(cardId: String, tmuxName: String, sessionLink: SessionLink?, worktreeLink: WorktreeLink?, isRemote: Bool)
     case launchTmuxReady(cardId: String)
@@ -292,6 +297,7 @@ public enum Effect: Sendable {
     case killTmuxSessions([String])
     case deleteSessionFile(String) // path
     case cleanupTerminalCache(sessionNames: [String])
+    case cleanupBrowserCache(cardId: String)
     case refreshDiscovery
     case updateSessionIndex(sessionId: String, name: String)
     case moveSessionFile(cardId: String, sessionId: String, oldPath: String, newProjectPath: String)
@@ -464,6 +470,10 @@ public enum Reducer {
                 effects.append(.cleanupTerminalCache(sessionNames: tmux.allSessionNames))
                 link.tmuxLink = nil
             }
+            if link.browserTabs != nil {
+                effects.append(.cleanupBrowserCache(cardId: cardId))
+                link.browserTabs = nil
+            }
             state.links[cardId] = link
             effects.insert(.upsertLink(link), at: 0)
             return effects
@@ -480,6 +490,9 @@ public enum Reducer {
             if let tmux = link.tmuxLink {
                 effects.append(.killTmuxSessions(tmux.allSessionNames))
                 effects.append(.cleanupTerminalCache(sessionNames: tmux.allSessionNames))
+            }
+            if link.browserTabs != nil {
+                effects.append(.cleanupBrowserCache(cardId: cardId))
             }
             if let sessionPath = link.sessionLink?.sessionPath {
                 effects.append(.deleteSessionFile(sessionPath))
@@ -695,6 +708,33 @@ public enum Reducer {
                   let prompts = link.queuedPrompts else { return [] }
             let byId = Dictionary(prompts.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
             link.queuedPrompts = promptIds.compactMap { byId[$0] }
+            state.links[cardId] = link
+            return [.upsertLink(link)]
+
+        case .addBrowserTab(let cardId, let tabId, let url):
+            guard var link = state.links[cardId] else { return [] }
+            var tabs = link.browserTabs ?? []
+            tabs.append(BrowserTabInfo(id: tabId, url: url))
+            link.browserTabs = tabs
+            link.updatedAt = .now
+            state.links[cardId] = link
+            return [.upsertLink(link)]
+
+        case .removeBrowserTab(let cardId, let tabId):
+            guard var link = state.links[cardId] else { return [] }
+            link.browserTabs?.removeAll { $0.id == tabId }
+            if link.browserTabs?.isEmpty == true { link.browserTabs = nil }
+            link.updatedAt = .now
+            state.links[cardId] = link
+            return [.upsertLink(link)]
+
+        case .updateBrowserTab(let cardId, let tabId, let url, let title):
+            guard var link = state.links[cardId] else { return [] }
+            guard var tabs = link.browserTabs,
+                  let idx = tabs.firstIndex(where: { $0.id == tabId }) else { return [] }
+            if let url { tabs[idx].url = url }
+            if let title { tabs[idx].title = title }
+            link.browserTabs = tabs
             state.links[cardId] = link
             return [.upsertLink(link)]
 

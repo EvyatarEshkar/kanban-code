@@ -20,8 +20,8 @@ final class BrowserTab: ObservableObject {
     private var observers: [NSKeyValueObservation] = []
     private var navigationCoordinator: BrowserNavigationCoordinator?
 
-    init(url: URL = URL(string: "http://localhost:5560/")!) {
-        self.id = "browser-\(UUID().uuidString)"
+    init(id: String? = nil, url: URL = URL(string: "http://localhost:5560/")!) {
+        self.id = id ?? "browser-\(UUID().uuidString)"
 
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()
@@ -193,7 +193,9 @@ struct BrowserWebViewRepresentable: NSViewRepresentable {
 /// Full browser UI: navigation bar, progress indicator, and web content.
 struct BrowserContentView: View {
     @ObservedObject var tab: BrowserTab
+    var onNavigated: ((String, String?, String?) -> Void)? // (tabId, url?, title?)
     @State private var urlText: String = ""
+    @State private var navigationDebounce: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -250,9 +252,22 @@ struct BrowserContentView: View {
         }
         .onChange(of: tab.currentURL) { _, newURL in
             urlText = newURL?.absoluteString ?? ""
+            debouncePersist()
+        }
+        .onChange(of: tab.pageTitle) {
+            debouncePersist()
         }
         .onAppear {
             urlText = tab.currentURL?.absoluteString ?? ""
+        }
+    }
+
+    private func debouncePersist() {
+        navigationDebounce?.cancel()
+        navigationDebounce = Task {
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            onNavigated?(tab.id, tab.currentURL?.absoluteString, tab.pageTitle)
         }
     }
 }

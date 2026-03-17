@@ -215,20 +215,92 @@ Feature: Embedded Browser Tab
     Then a browser tab should be created
     And the tab bar should appear with the browser tab
 
-  # ── Ephemeral State ──
+  # ── Browser Tab Persistence ──
+  #
+  # Browser tabs persist across card switches. Each card owns its own
+  # set of browser tabs, stored as BrowserTabInfo in link.browserTabs
+  # (persisted to links.json via the Elm architecture). Live WKWebView
+  # instances are held in a BrowserTabCache singleton (same pattern as
+  # TerminalCache) so they survive card switches without reloading.
 
-  Scenario: Browser tabs do not persist across app restarts
-    Given I have two browser tabs open
+  Scenario: Browser tabs persist when switching between cards
+    Given card A has a browser tab open at "http://localhost:5560/dashboard"
+    And card B has no browser tabs
+    When I switch to card B
+    And switch back to card A
+    Then the browser tab should still be present in card A's tab bar
+    And the page should still show "http://localhost:5560/dashboard"
+    And the scroll position and page state should be preserved (no reload)
+    Because live WKWebView instances are cached in BrowserTabCache
+
+  Scenario: Each card has independent browser tabs
+    Given card A has browser tabs "Dashboard" and "Docs"
+    And card B has browser tab "Settings"
+    When I switch between card A and card B
+    Then card A should always show its two tabs
+    And card B should always show its one tab
+    And they should never mix or leak between cards
+
+  Scenario: Browser tab URLs are stored in links.json
+    When I create a browser tab and navigate to "http://localhost:3000"
+    Then a BrowserTabInfo should be added to the card's link.browserTabs
+    And it should contain:
+      | Field | Value                    |
+      | id    | browser-{UUID}           |
+      | url   | http://localhost:3000     |
+      | title | page title (once loaded) |
+    And links.json should be updated via .upsertLink effect
+
+  Scenario: Browser tab creation dispatches addBrowserTab action
+    When I click the globe button to create a browser tab
+    Then an .addBrowserTab(cardId, tabId, url) action should be dispatched
+    And the reducer should append a BrowserTabInfo to link.browserTabs
+    And return an .upsertLink effect to persist the change
+
+  Scenario: Browser tab close dispatches removeBrowserTab action
+    When I close a browser tab
+    Then a .removeBrowserTab(cardId, tabId) action should be dispatched
+    And the reducer should remove the BrowserTabInfo by id
+    And the WKWebView should be removed from BrowserTabCache
+    And links.json should be updated
+
+  Scenario: URL navigation dispatches updateBrowserTab action (debounced)
+    Given a browser tab is open
+    When I navigate to a new URL within the browser
+    Then an .updateBrowserTab(cardId, tabId, url, title) action should be dispatched
+    But only after a 1-second debounce (to avoid flooding during redirects)
+    And links.json should reflect the final URL
+
+  Scenario: Browser tabs restore from links.json on card open
+    Given card A has browserTabs in links.json:
+      | id          | url                          | title       |
+      | browser-abc | http://localhost:5560/        | Dashboard   |
+      | browser-def | http://localhost:5560/settings| Settings    |
+    When I open card A's detail view
+    Then two browser tabs should appear in the tab bar
+    And BrowserTabCache should create WKWebView instances for each
+    And each should navigate to its persisted URL
+
+  Scenario: Browser tabs persist across app restarts (URL only)
+    Given I have browser tabs open with navigated pages
     When I quit and relaunch Kanban Code
-    Then the browser tabs should not be restored
-    And the terminal tab bar should show only terminal tabs
-    Because browser state is ephemeral (not stored in links.json)
+    Then the browser tabs should be restored from links.json
+    And each tab should navigate to its saved URL
+    But page state (scroll, form data, cookies) may not be preserved
+    Because only the URL is persisted, not the full WKWebView state
 
-  Scenario: Browser tabs do not affect store or reducer
-    When I create, switch, or close browser tabs
-    Then no actions should be dispatched to the BoardStore
-    And links.json should not be modified
-    Because browser state is managed as @State in the view layer
+  Scenario: BrowserTabCache reuses WKWebView across card switches
+    Given card A has a browser tab with a loaded page
+    When I switch to card B and back to card A
+    Then the same WKWebView instance should be reused (not recreated)
+    And the page should not reload
+    Because BrowserTabCache holds live instances keyed by (cardId, tabId)
+
+  Scenario: BrowserTabCache cleans up on card delete
+    Given card A has two browser tabs cached in BrowserTabCache
+    When card A is deleted or archived
+    Then BrowserTabCache.removeAllForCard(cardId) should be called
+    And both WKWebView instances should be deallocated
 
   # ── Keyboard and Interaction ──
 

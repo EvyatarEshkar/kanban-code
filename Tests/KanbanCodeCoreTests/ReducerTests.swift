@@ -490,6 +490,7 @@ struct ReducerTests {
         state.links["card_c1"] = link
         state.sessions["sess_1"] = Session(id: "sess_1", name: "My Session", messageCount: 3, modifiedTime: .now)
         state.activityMap["sess_1"] = .activelyWorking
+        state.rebuildCards()
 
         let cards = state.cards
         #expect(cards.count == 1)
@@ -503,6 +504,7 @@ struct ReducerTests {
         state.links["c1"] = makeLink(id: "c1")  // projectPath = /test/project
         let otherLink = Link(id: "c2", name: "Other", projectPath: "/other/project", column: .backlog, source: .manual)
         state.links["c2"] = otherLink
+        state.rebuildCards()
 
         state.selectedProjectPath = "/test/project"
         #expect(state.filteredCards.count == 1)

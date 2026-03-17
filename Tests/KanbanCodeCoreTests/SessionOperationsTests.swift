@@ -54,7 +54,8 @@ struct SessionOperationsTests {
             #"{"type":"assistant","sessionId":"s1","message":{"content":[{"type":"text","text":"Reply 2"}]}}"#,
         ].joined(separator: "\n").write(toFile: path, atomically: true, encoding: .utf8)
 
-        let turn = ConversationTurn(index: 1, lineNumber: 2, role: "assistant", textPreview: "Reply 1")
+        // lineNumber is a byte offset — line 2 starts at byte 77 (76 chars + newline)
+        let turn = ConversationTurn(index: 1, lineNumber: 77, role: "assistant", textPreview: "Reply 1")
         try await store.truncateSession(sessionPath: path, afterTurn: turn)
 
         // Check backup was created
