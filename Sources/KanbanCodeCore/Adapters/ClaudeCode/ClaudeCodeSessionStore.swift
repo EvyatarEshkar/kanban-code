@@ -143,7 +143,7 @@ public final class ClaudeCodeSessionStore: SessionStore, @unchecked Sendable {
 
                 let hasToolUse = !toolCalls.isEmpty
                 let msgId = "msg_migrated_\(UUID().uuidString.prefix(12))"
-                var message: [String: Any] = [
+                let message: [String: Any] = [
                     "id": msgId,
                     "type": "message",
                     "role": "assistant",

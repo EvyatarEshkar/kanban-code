@@ -74,7 +74,6 @@ final class BatchedTerminalView: LocalProcessTerminalView {
         let now = DispatchTime.now().uptimeNanoseconds
         if now < scheduledFlushTime {
             // Data arrived recently — wait more
-            let remaining = scheduledFlushTime - now
             DispatchQueue.main.asyncAfter(
                 deadline: DispatchTime(uptimeNanoseconds: scheduledFlushTime)
             ) { [weak self] in
