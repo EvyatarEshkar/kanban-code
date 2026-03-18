@@ -508,7 +508,7 @@ struct NotificationSettingsView: View {
                 .onChange(of: pushoverMode) { scheduleSave() }
 
                 if pushoverMode == .whenLidClosed {
-                    Text("Sends Pushover when MacBook lid is closed, local notifications otherwise.")
+                    Text("Sends Pushover when MacBook lid is closed and no external display is active, local notifications otherwise.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

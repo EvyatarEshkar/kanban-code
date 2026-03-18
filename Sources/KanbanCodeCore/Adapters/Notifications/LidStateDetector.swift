@@ -1,9 +1,17 @@
 import Foundation
 import IOKit
+import CoreGraphics
 
 /// Detects whether the MacBook lid (clamshell) is closed via IOKit.
 /// Works even when Amphetamine or similar tools keep the system awake.
 public enum LidStateDetector {
+    /// True when lid is closed AND no external display is active.
+    /// When lid is closed but an external monitor is connected, returns false
+    /// (user is at their desk using the external display).
+    public static var isAway: Bool {
+        isLidClosed && !hasActiveExternalDisplay
+    }
+
     public static var isLidClosed: Bool {
         let service = IOServiceGetMatchingService(
             kIOMainPortDefault,
@@ -19,10 +27,21 @@ public enum LidStateDetector {
             return false
         }
 
-        // Value is CFBoolean (bridged to NSNumber), compare as Int for safety
         if let num = prop as? Int {
             return num != 0
         }
         return (prop as? Bool) ?? false
+    }
+
+    private static var hasActiveExternalDisplay: Bool {
+        var displayIDs = [CGDirectDisplayID](repeating: 0, count: 16)
+        var count: UInt32 = 0
+        CGGetActiveDisplayList(16, &displayIDs, &count)
+        for i in 0..<Int(count) {
+            if CGDisplayIsBuiltin(displayIDs[i]) == 0 {
+                return true
+            }
+        }
+        return false
     }
 }

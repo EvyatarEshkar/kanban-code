@@ -41,7 +41,7 @@ public final class CompositeNotifier: NotifierPort, @unchecked Sendable {
         switch pushoverMode {
         case .disabled: return false
         case .enabled: return true
-        case .whenLidClosed: return LidStateDetector.isLidClosed
+        case .whenLidClosed: return LidStateDetector.isAway
         }
     }
 }

@@ -292,6 +292,7 @@ private struct ChatMessageList: View {
                         .id("bottom-spacer")
                 }
                 .padding(.horizontal, 16)
+                .textSelection(.enabled)
             }
             .defaultScrollAnchor(.bottom)
             .modifier(ScrollBottomTracker(isAtBottom: $isAtBottom, hasNewMessages: $hasNewMessages))
