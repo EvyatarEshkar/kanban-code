@@ -19,11 +19,17 @@
 
 ---
 
+Kanban Mode:
 ![Kanban Code](assets/screenshot.webp)
+
+Productive Mode:
+![Kanban Code Productive Mode](assets/productive-mode.webp)
 
 ## What is Kanban Code?
 
-A native macOS app for running multiple Claude Code agents in parallel. Each task is a card on a Kanban board that automatically links your Claude session, git worktree, tmux terminal, and GitHub PR together — cards flow from backlog to done as Claude works, opens PRs, and gets them merged. Push notifications on your phone when agents need attention, remote execution to offload work to a server, and sleep prevention to keep your Mac awake while agents run.
+A native macOS app for running multiple Claude Code agents in parallel. Each task is a card on a Kanban board that automatically links your Claude session, git worktree, tmux terminals, and GitHub PR together — cards flow from backlog to done as Claude works, opens PRs, and gets them merged. Push notifications on your phone when agents need attention, remote execution to offload work to a server, and sleep prevention to keep your Mac awake while agents run.
+
+Kanban Code's goal is to ease as much as possible the context switching bottleneck for modern development by connecting all context needed for each Claude session into their cards.
 
 Kanban Code combines the lessons learned from [claude-resume](https://github.com/langwatch/claude-resume), [claude-remote](https://github.com/langwatch/claude-remote), [git-orchard](https://github.com/drewdrewthis/git-orchard), [claude-pushover](https://github.com/langwatch/claude-pushover), and [cc-amphetamine](https://github.com/rogeriochaves/cc-amphetamine) into one unified experience.
 
@@ -285,6 +291,12 @@ make run-app
 ```
 
 The spec files in `spec/` document every feature and edge case in detail.
+
+## Testimonials
+
+![This is an incredible vision.](assets/claude-testimonial.webp)
+
+— Claude Code, when first seeing Kanban Code's [initial prompt](./initial-prompt.md)
 
 ## License
 
