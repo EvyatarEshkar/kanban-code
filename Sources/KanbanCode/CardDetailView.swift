@@ -411,11 +411,15 @@ struct CardDetailView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .kanbanCloseTerminalTab)) { _ in
             guard selectedTab == .terminal else { return }
-            // Only close extra shell tabs, not the Claude session
-            guard let session = selectedTerminalSession else { return }
-            onKillTerminal(session)
-            let remaining = shellSessions.filter { $0 != session }
-            selectedTerminalSession = remaining.first
+            // Close the currently selected tab — shell or browser
+            if let browserId = selectedBrowserTabId,
+               let tab = browserTabs.first(where: { $0.id == browserId }) {
+                closeBrowserTab(tab)
+            } else if let session = selectedTerminalSession {
+                onKillTerminal(session)
+                let remaining = shellSessions.filter { $0 != session }
+                selectedTerminalSession = remaining.first
+            }
         }
         .onChange(of: focusTerminal) {
             if focusTerminal {
