@@ -224,6 +224,9 @@ struct CardDetailView: View {
     @State private var hoveredTab: String?
     @State private var hoveredCloseBtn: String?
     @State private var dropTargetTab: String?
+    /// User's tab ordering — IDs of shell sessions + browser tabs in display order.
+    /// When empty, falls back to shells-then-browsers default.
+    @State private var customTabOrder: [String] = []
     @State private var terminalPaths: [String: String] = [:]  // sessionName → last path component
     @State private var pathPollTask: Task<Void, Never>?
 
@@ -535,6 +538,18 @@ struct CardDetailView: View {
         return tmux.sessionName
     }
 
+    /// Reorder a tab by moving `movedId` before `beforeId`. If `beforeId` is nil, move to end.
+    private func reorderTab(_ movedId: String, before beforeId: String?) {
+        var order = unifiedExtraTabs.map(\.id)
+        order.removeAll { $0 == movedId }
+        if let beforeId, let idx = order.firstIndex(of: beforeId) {
+            order.insert(movedId, at: idx)
+        } else {
+            order.append(movedId)
+        }
+        customTabOrder = order
+    }
+
     /// Unified tab item for the tab bar (shells + browser tabs interleaved).
     private enum UnifiedTab: Identifiable {
         case shell(String)
@@ -549,10 +564,21 @@ struct CardDetailView: View {
     }
 
     /// Merged list of shell + browser tabs in display order.
+    /// Respects `customTabOrder` for user-defined ordering.
     private var unifiedExtraTabs: [UnifiedTab] {
         let shells = shellSessions.map { UnifiedTab.shell($0) }
         let browsers = browserTabs.map { UnifiedTab.browser($0) }
-        return shells + browsers
+        let all = shells + browsers
+        guard !customTabOrder.isEmpty else { return all }
+        // Sort by custom order; new tabs (not in order) go at the end
+        let byId = Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        var ordered: [UnifiedTab] = customTabOrder.compactMap { byId[$0] }
+        // Append any tabs not in the order (newly created)
+        let orderedIds = Set(customTabOrder)
+        for tab in all where !orderedIds.contains(tab.id) {
+            ordered.append(tab)
+        }
+        return ordered
     }
 
     /// All live shell session names (extras + live shell-only primary).
@@ -706,7 +732,7 @@ struct CardDetailView: View {
                     .fixedSize()
                     .dropDestination(for: String.self) { items, _ in
                         guard let dropped = items.first else { return false }
-                        onReorderTerminal(dropped, nil)
+                        reorderTab(dropped, before: nil)
                         draggingTab = nil
                         dropTargetTab = nil
                         return true
@@ -1175,7 +1201,7 @@ struct CardDetailView: View {
         }
         .dropDestination(for: String.self) { items, _ in
             guard let dropped = items.first, dropped != sessionName else { return false }
-            onReorderTerminal(dropped, sessionName)
+            reorderTab(dropped, before: sessionName)
             draggingTab = nil
             dropTargetTab = nil
             return true
@@ -1257,7 +1283,7 @@ struct CardDetailView: View {
         }
         .dropDestination(for: String.self) { items, _ in
             guard let dropped = items.first, dropped != tab.id else { return false }
-            onReorderTerminal(dropped, tab.id)
+            reorderTab(dropped, before: tab.id)
             draggingTab = nil
             dropTargetTab = nil
             return true

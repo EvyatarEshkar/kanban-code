@@ -376,10 +376,19 @@ final class TerminalCache {
 
     /// Find the active (visible) session name for the terminal under the given window point.
     /// Bypasses hitTest which can be intercepted by SwiftUI overlay views.
+    /// Checks both isHidden and effective opacity (parent container may be opacity 0).
     func sessionUnderPoint(_ windowPoint: NSPoint, in window: NSWindow) -> String? {
         for (sessionName, terminal) in terminals {
             guard !terminal.isHidden,
                   terminal.window == window else { continue }
+            // Check if any ancestor has opacity 0 (e.g. when browser tab is selected)
+            var view: NSView? = terminal.superview
+            var effectivelyHidden = false
+            while let v = view {
+                if v.alphaValue < 0.01 { effectivelyHidden = true; break }
+                view = v.superview
+            }
+            guard !effectivelyHidden else { continue }
             let localPoint = terminal.convert(windowPoint, from: nil)
             if terminal.bounds.contains(localPoint) {
                 return sessionName
