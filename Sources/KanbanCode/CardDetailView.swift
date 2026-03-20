@@ -868,8 +868,6 @@ struct CardDetailView: View {
             }
             .onChange(of: card.link.tmuxLink) {
                 let shells = shellSessions
-                let newCount = shells.count + (claudeTmuxSession != nil ? 1 : 0)
-
                 if let selected = selectedTerminalSession, !shells.contains(selected) {
                     // Selected shell was killed — go to next shell or Claude tab
                     selectedTerminalSession = shells.first // nil if no shells left → Claude tab
@@ -998,7 +996,7 @@ struct CardDetailView: View {
     /// Resume overlay shown at the bottom of chat mode when session is dead.
     private var chatModeResumeOverlay: some View {
         let assistant = card.link.effectiveAssistant
-        return HStack(spacing: 8) {
+        HStack(spacing: 8) {
             Text("\(assistant.displayName) session ended")
                 .font(.app(.callout))
                 .foregroundStyle(.secondary)
