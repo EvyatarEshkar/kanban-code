@@ -141,6 +141,9 @@ struct ChatView: View {
             )
             }
         }
+        .onAppear {
+            clearPendingIfMatched()
+        }
         .onChange(of: turns.count) {
             clearPendingIfMatched()
         }

@@ -386,24 +386,23 @@ struct CardDetailView: View {
             guard let index = notif.userInfo?["index"] as? Int else { return }
             selectedTab = .terminal
 
-            // Unified tab order: [assistant, ...shells, ...browserTabs]
-            let shells = shellSessions
+            // Unified tab order: [assistant, ...unifiedExtraTabs]
+            let tabs = unifiedExtraTabs
             if index == 0 {
                 // Claude/assistant tab
                 selectedTerminalSession = nil
                 selectedBrowserTabId = nil
                 terminalGrabFocus = true
-            } else if index - 1 < shells.count {
-                // Shell tab
-                selectedTerminalSession = shells[index - 1]
-                selectedBrowserTabId = nil
-                terminalGrabFocus = true
-            } else {
-                // Browser tab
-                let browserIndex = index - 1 - shells.count
-                if browserIndex < browserTabs.count {
+            } else if index - 1 < tabs.count {
+                let tab = tabs[index - 1]
+                switch tab {
+                case .shell(let session):
+                    selectedTerminalSession = session
+                    selectedBrowserTabId = nil
+                    terminalGrabFocus = true
+                case .browser(let browserTab):
                     selectedTerminalSession = nil
-                    selectedBrowserTabId = browserTabs[browserIndex].id
+                    selectedBrowserTabId = browserTab.id
                 }
             }
         }
@@ -536,6 +535,26 @@ struct CardDetailView: View {
         return tmux.sessionName
     }
 
+    /// Unified tab item for the tab bar (shells + browser tabs interleaved).
+    private enum UnifiedTab: Identifiable {
+        case shell(String)
+        case browser(BrowserTab)
+
+        var id: String {
+            switch self {
+            case .shell(let name): return name
+            case .browser(let tab): return tab.id
+            }
+        }
+    }
+
+    /// Merged list of shell + browser tabs in display order.
+    private var unifiedExtraTabs: [UnifiedTab] {
+        let shells = shellSessions.map { UnifiedTab.shell($0) }
+        let browsers = browserTabs.map { UnifiedTab.browser($0) }
+        return shells + browsers
+    }
+
     /// All live shell session names (extras + live shell-only primary).
     private var shellSessions: [String] {
         guard let tmux = card.link.tmuxLink else { return [] }
@@ -633,25 +652,27 @@ struct CardDetailView: View {
                         assistantTab(isSelected: isClaudeTabSelected, isLaunching: isLaunching)
                             .frame(maxWidth: .infinity)
 
-                        ForEach(shellSessions, id: \.self) { sessionName in
-                            if dropTargetTab == sessionName, let drag = draggingTab, drag != sessionName {
+                        ForEach(unifiedExtraTabs, id: \.id) { item in
+                            if dropTargetTab == item.id, let drag = draggingTab, drag != item.id {
                                 tabDropIndicator
                             }
 
-                            shellTab(
-                                sessionName: sessionName,
-                                isSelected: selectedTerminalSession == sessionName
-                            )
-                            .frame(maxWidth: .infinity)
-                            .opacity(draggingTab == sessionName ? 0.3 : 1.0)
-                        }
-
-                        ForEach(browserTabs, id: \.id) { tab in
-                            browserTab(
-                                tab: tab,
-                                isSelected: selectedBrowserTabId == tab.id
-                            )
-                            .frame(maxWidth: .infinity)
+                            switch item {
+                            case .shell(let sessionName):
+                                shellTab(
+                                    sessionName: sessionName,
+                                    isSelected: selectedTerminalSession == sessionName
+                                )
+                                .frame(maxWidth: .infinity)
+                                .opacity(draggingTab == sessionName ? 0.3 : 1.0)
+                            case .browser(let tab):
+                                browserTab(
+                                    tab: tab,
+                                    isSelected: selectedBrowserTabId == tab.id
+                                )
+                                .frame(maxWidth: .infinity)
+                                .opacity(draggingTab == tab.id ? 0.3 : 1.0)
+                            }
                         }
 
                         if dropTargetTab == "_end_", draggingTab != nil {
@@ -1230,6 +1251,23 @@ struct CardDetailView: View {
             }
         }
         .onHover { hoveredTab = $0 ? tab.id : (hoveredTab == tab.id ? nil : hoveredTab) }
+        .onDrag {
+            draggingTab = tab.id
+            return NSItemProvider(object: tab.id as NSString)
+        }
+        .dropDestination(for: String.self) { items, _ in
+            guard let dropped = items.first, dropped != tab.id else { return false }
+            onReorderTerminal(dropped, tab.id)
+            draggingTab = nil
+            dropTargetTab = nil
+            return true
+        } isTargeted: { targeted in
+            if targeted {
+                dropTargetTab = tab.id
+            } else if dropTargetTab == tab.id {
+                dropTargetTab = nil
+            }
+        }
     }
 
     /// Hydrate live BrowserTab instances from persisted BrowserTabInfo in the link.
