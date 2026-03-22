@@ -218,7 +218,7 @@ private struct ChatMessageList: View {
         ZStack(alignment: .top) {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(spacing: 0) {
+                LazyVStack(spacing: 0) {
                     // Spacer for search bar
                     if showSearch { Color.clear.frame(height: 36) }
                     if hasMoreTurns && !turns.isEmpty {
@@ -234,17 +234,16 @@ private struct ChatMessageList: View {
                     // Last visible turn = last turn in the last group (groups skip invisible turns)
                     let lastVisibleLN = turnGroups.last?.last?.lineNumber
 
-                    ForEach(turnGroups.indices, id: \.self) { gi in
-                        let group = turnGroups[gi]
+                    ForEach(Array(turnGroups.enumerated()), id: \.element.first?.lineNumber) { gi, group in
                         if group.count > 1 {
                             // Multiple consecutive tool-only turns — single shared bubble
                             let toolTurns = group.filter { $0.role == "assistant" }
                             VStack(alignment: .leading, spacing: 2) {
-                                ForEach(toolTurns.indices, id: \.self) { ti in
+                                ForEach(toolTurns, id: \.lineNumber) { toolTurn in
                                     ChatMessageView(
-                                        turn: toolTurns[ti],
+                                        turn: toolTurn,
                                         assistant: assistant,
-                                        toolResultMap: toolResults[toolTurns[ti].lineNumber] ?? [:],
+                                        toolResultMap: toolResults[toolTurn.lineNumber] ?? [:],
                                         isLastInGroup: false,
                                         onCopy: { text in
                                             NSPasteboard.general.clearContents()
@@ -255,16 +254,16 @@ private struct ChatMessageList: View {
                                         onSendAnswer: onSendAnswer,
                                         suppressBackground: true,
                                         highlightText: activeQuery.isEmpty ? nil : activeQuery,
-                                        isCurrentMatch: currentMatchTurnIndex == toolTurns[ti].index,
+                                        isCurrentMatch: currentMatchTurnIndex == toolTurn.index,
                                         sessionPath: sessionPath,
                                         tmuxSessionName: tmuxSessionName,
-                                        isLastTurn: toolTurns[ti].lineNumber == lastVisibleLN,
+                                        isLastTurn: toolTurn.lineNumber == lastVisibleLN,
                                         expandedTextBlocks: $expandedTextBlocks
                                     )
                                     .equatable()
-                                    .id(toolTurns[ti].lineNumber)
                                 }
                             }
+                            .id(group.first?.lineNumber ?? 0)
                             .background(
                                 RoundedRectangle(cornerRadius: 8)
                                     .fill(Color.primary.opacity(0.04))

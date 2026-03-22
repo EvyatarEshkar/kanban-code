@@ -122,6 +122,8 @@ struct CardDetailView: View {
     @State private var suppressTerminalFocus: Bool = false
     @State private var tabRenameItem: TabRenameItem?
     @State private var draggingTab: String?
+    @State private var lastTabClickTime: Double = 0
+    @State private var lastTabClickTarget: String?
     @State private var hoveredTab: String?
     @State private var hoveredCloseBtn: String?
     @State private var dropTargetTab: String?
@@ -823,6 +825,13 @@ struct CardDetailView: View {
                     }
                 }
             }
+            .onChange(of: effectiveActiveSession) {
+                // In expanded (fullscreen) mode, auto-focus terminal when active session changes
+                // (e.g. closing a tab falls back to Claude tab — user should be able to type immediately)
+                if isExpanded && selectedBrowserTabId == nil {
+                    terminalGrabFocus = true
+                }
+            }
             .onChange(of: card.link.tmuxLink) {
                 let shells = shellSessions
                 if let selected = selectedTerminalSession, !shells.contains(selected) {
@@ -1089,13 +1098,21 @@ struct CardDetailView: View {
         .padding(.horizontal, 4)
         .padding(.vertical, 2)
         .contentShape(Capsule())
-        .onTapGesture(count: 2) {
-            tabRenameItem = TabRenameItem(sessionName: sessionName, currentName: customName ?? displayName)
-        }
-        .onTapGesture(count: 1) {
+        .onTapGesture {
+            // Instant switch on every click; detect double-click manually
+            // so SwiftUI doesn't delay the first tap for disambiguation.
+            let now = CACurrentMediaTime()
+            if selectedTerminalSession == sessionName,
+               now - lastTabClickTime < NSEvent.doubleClickInterval,
+               lastTabClickTarget == sessionName {
+                // Second click on same tab within threshold → rename
+                tabRenameItem = TabRenameItem(sessionName: sessionName, currentName: customName ?? displayName)
+            }
             selectedTerminalSession = sessionName
             selectedBrowserTabId = nil
             terminalGrabFocus = true
+            lastTabClickTime = now
+            lastTabClickTarget = sessionName
         }
         .background {
             if isSelected {

@@ -1,4 +1,7 @@
 import Foundation
+#if DEBUG
+import QuartzCore
+#endif
 
 // MARK: - Dialog State
 
@@ -1307,8 +1310,19 @@ public final class BoardStore: @unchecked Sendable {
 
     /// Dispatch an action. Reducer runs synchronously, effects run async.
     public func dispatch(_ action: Action) {
+        #if DEBUG
+        let t = CACurrentMediaTime()
+        #endif
         let effects = Reducer.reduce(state: &state, action: action)
         state.rebuildCards()
+        #if DEBUG
+        let totalMs = (CACurrentMediaTime() - t) * 1000
+        if totalMs > 4 {
+            // Use Mirror to get just the action case name without serializing associated values
+            let actionName = Mirror(reflecting: action).children.first?.label ?? String(describing: action)
+            KanbanCodeLog.info("dispatch-perf", String(format: "dispatch(%@): %.1fms", actionName, totalMs))
+        }
+        #endif
         for effect in effects {
             Task { [weak self] in
                 guard let self else { return }
