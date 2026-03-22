@@ -1,4 +1,4 @@
-.PHONY: build test run app run-app clean
+.PHONY: build test run app run-app run-release clean
 
 BUNDLE_NAME = KanbanCode.app
 BUNDLE_DIR = build/$(BUNDLE_NAME)
@@ -56,6 +56,11 @@ app: build
 
 run-app: app
 	open $(BUNDLE_DIR)
+
+run-release:
+	swift build -c release
+	@$(MAKE) app CONFIG=release
+	KANBAN_WATCHDOG=1 build/$(BUNDLE_NAME)/Contents/MacOS/KanbanCode
 
 clean:
 	swift package clean

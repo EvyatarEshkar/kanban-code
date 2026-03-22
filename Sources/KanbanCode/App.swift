@@ -8,9 +8,7 @@ struct KanbanCodeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     init() {
-        #if DEBUG
         MainThreadWatchdog.shared.start()
-        #endif
     }
 
     var body: some Scene {

@@ -1,11 +1,11 @@
-#if DEBUG
 import Foundation
 import QuartzCore
 import os
 
 /// Detects main thread hangs by pinging from a background thread.
 /// Logs any hang > threshold to ~/.kanban-code/logs/main-thread-hangs.log
-/// DEBUG-only — never runs in release builds.
+/// Dormant by default — call start() to enable. In release builds,
+/// only starts when KANBAN_WATCHDOG=1 environment variable is set.
 final class MainThreadWatchdog: @unchecked Sendable {
     static let shared = MainThreadWatchdog()
 
@@ -27,6 +27,11 @@ final class MainThreadWatchdog: @unchecked Sendable {
     }
 
     func start() {
+        #if !DEBUG
+        // In release builds, only run if explicitly opted in
+        guard ProcessInfo.processInfo.environment["KANBAN_WATCHDOG"] == "1" else { return }
+        #endif
+
         let alreadyRunning = _isRunning.withLock { val -> Bool in
             if val { return true }
             val = true
@@ -77,4 +82,3 @@ final class MainThreadWatchdog: @unchecked Sendable {
         }
     }
 }
-#endif
