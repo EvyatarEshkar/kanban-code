@@ -80,6 +80,10 @@ public final class AppState: @unchecked Sendable {
     /// Cached cards array — rebuilt by BoardStore after each dispatch.
     public internal(set) var cards: [KanbanCodeCard] = []
 
+    /// The currently selected card — independently tracked so CardDetailView
+    /// only re-renders when the selected card's data actually changes.
+    public internal(set) var selectedCard: KanbanCodeCard?
+
     /// Cards visible after project filtering — cached for independent observation.
     public internal(set) var filteredCards: [KanbanCodeCard] = []
 
@@ -100,6 +104,9 @@ public final class AppState: @unchecked Sendable {
             return KanbanCodeCard(link: link, session: session, activityState: activity, isBusy: busyCards.contains(link.id), isRateLimited: rateLimited)
         }
         if newCards != cards { cards = newCards }
+
+        let newSelected = selectedCardId.flatMap { id in cards.first { $0.id == id } }
+        if newSelected != selectedCard { selectedCard = newSelected }
 
         let newFiltered = cards.filter { cardMatchesProjectFilter($0) }
         if newFiltered != filteredCards { filteredCards = newFiltered }

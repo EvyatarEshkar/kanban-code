@@ -549,7 +549,7 @@ struct ContentView: View {
 
     @ViewBuilder
     private var inspectorContent: some View {
-        if let card = store.state.cards.first(where: { $0.id == store.state.selectedCardId }) {
+        if let card = store.state.selectedCard {
             makeCardDetailView(card: card)
         }
     }
@@ -573,7 +573,7 @@ struct ContentView: View {
     private var boardWithOverlays: some View {
         Group {
             if isExpandedDetail {
-                if let card = store.state.cards.first(where: { $0.id == store.state.selectedCardId }) {
+                if let card = store.state.selectedCard {
                     makeCardDetailView(card: card)
                 } else {
                     expandedEmptyState
@@ -645,7 +645,7 @@ struct ContentView: View {
             }
             .animation(.easeInOut(duration: 0.15), value: isDroppingFolder)
             .overlay {
-                if let card = store.state.cards.first(where: { $0.id == store.state.selectedCardId }),
+                if let card = store.state.selectedCard,
                    let sessionName = card.link.tmuxLink?.sessionName {
                     ImageDropZone(isTargeted: $isDroppingImage) { imageData in
                         NSPasteboard.general.clearContents()
@@ -1073,7 +1073,7 @@ struct ContentView: View {
                     }
                 }
 
-                if tbVis.showExpandedCardInfo, let card = store.state.cards.first(where: { $0.id == store.state.selectedCardId }) {
+                if tbVis.showExpandedCardInfo, let card = store.state.selectedCard {
                     ToolbarItemGroup(placement: .navigation) {
                         HStack {
                             Text("⠀⠀" + card.displayTitle)
@@ -1468,7 +1468,7 @@ struct ContentView: View {
             // Fullscreen: never close the card with Esc
             if isExpandedDetail { return }
             // Chat mode + working: send interrupt instead of closing
-            if let card = store.state.cards.first(where: { $0.id == store.state.selectedCardId }),
+            if let card = store.state.selectedCard,
                let session = card.link.tmuxLink?.sessionName,
                card.activityState == .activelyWorking || card.activityState == .idleWaiting {
                 if UserDefaults.standard.bool(forKey: "preferChatView") {
