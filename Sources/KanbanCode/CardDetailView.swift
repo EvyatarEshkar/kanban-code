@@ -118,6 +118,8 @@ struct CardDetailView: View {
     // Multi-terminal
     @State private var selectedTerminalSession: String?
     @State private var knownShellCount: Int = 0
+    /// Per-card tab memory: remembers which terminal/browser tab was selected for each card.
+    @State private var cardTabMemory: [String: (terminal: String?, browser: String?)] = [:]
     @State private var terminalGrabFocus: Bool = false
     @State private var suppressTerminalFocus: Bool = false
     @State private var tabRenameItem: TabRenameItem?
@@ -235,16 +237,29 @@ struct CardDetailView: View {
                 onAddPR: { onAddPR($0); showAddLink = false }
             )
         }
+        .onChange(of: card.id) { oldId, _ in
+            // Save current tab selection for the old card before switching
+            if !oldId.isEmpty {
+                cardTabMemory[oldId] = (terminal: selectedTerminalSession, browser: selectedBrowserTabId)
+            }
+            // Restore tab selection for the new card (synchronous — no flicker)
+            let saved = cardTabMemory[card.id]
+            selectedTerminalSession = saved?.terminal
+            selectedBrowserTabId = saved?.browser
+            // Clear stale state synchronously so the new card never renders
+            // with the previous card's turns or chat state.
+            turns = []
+            chatPendingMessage = nil
+            checkpointMode = false
+            // Set knownShellCount to current shells so onChange(of: tmuxLink)
+            // doesn't think new shells were added and auto-switch away.
+            knownShellCount = card.link.tmuxLink?.extraSessions?.count ?? 0
+        }
         .task(id: card.id) {
             actionsMenuProvider?.builder = { [self] in buildActionsMenu() }
-            turns = []
             isLoadingHistory = false
             isLoadingMore = false
             hasMoreTurns = false
-            checkpointMode = false
-            chatPendingMessage = nil
-            selectedTerminalSession = nil
-            selectedBrowserTabId = nil
             browserTabs = hydrateBrowserTabs()
             terminalGrabFocus = false
             // Reset tab to a valid one for this card (skip auto-focus)

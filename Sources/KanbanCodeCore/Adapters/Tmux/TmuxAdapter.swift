@@ -125,12 +125,25 @@ public final class TmuxAdapter: TmuxManagerPort, @unchecked Sendable {
     }
 
     /// Poll pane output to verify the prompt was sent. If text remains on the
-    /// prompt line after Enter, send Enter again (up to 5 retries).
+    /// prompt line after Enter, send Enter again.
+    /// Also waits through "working" periods (Claude may be mid-thought when
+    /// the paste arrived, so the text sits unsent until Claude finishes).
     /// Checks for: [Pasted text...] indicator, or text after the ❯/› prompt character.
     private func ensurePromptSent(sessionName: String) async throws {
-        for attempt in 0..<5 {
+        // Up to 120 attempts × 500ms = 60s max wait (covers long thinking periods)
+        for attempt in 0..<120 {
             try await Task.sleep(for: .milliseconds(attempt == 0 ? 300 : 500))
             let output = try await capturePane(sessionName: sessionName)
+
+            // If Claude is still working (thinking indicator visible), keep waiting —
+            // the text was pasted but can't be submitted until Claude shows the prompt.
+            let isWorking = PaneOutputParser.isWorking(output)
+            if isWorking {
+                if attempt % 10 == 0 {
+                    KanbanCodeLog.info("send", "Assistant still working on attempt \(attempt + 1), waiting...")
+                }
+                continue
+            }
 
             // Check if the prompt line still has unsent text
             let hasUnsentText: Bool
@@ -155,11 +168,17 @@ public final class TmuxAdapter: TmuxManagerPort, @unchecked Sendable {
                 let _ = try await ShellCommand.run(
                     tmuxPath, arguments: ["send-keys", "-t", sessionName, "Enter"]
                 )
+                // Check once more after pressing Enter to confirm it was accepted
+                try await Task.sleep(for: .milliseconds(300))
+                let afterOutput = try await capturePane(sessionName: sessionName)
+                if PaneOutputParser.isWorking(afterOutput) {
+                    return // Claude started working — prompt was accepted
+                }
             } else {
-                return
+                return // No unsent text — prompt was accepted
             }
         }
-        KanbanCodeLog.warn("send", "ensurePromptSent gave up after 5 attempts for \(sessionName)")
+        KanbanCodeLog.warn("send", "ensurePromptSent gave up after 120 attempts for \(sessionName)")
     }
 
     public func pastePrompt(to sessionName: String, text: String) async throws {
