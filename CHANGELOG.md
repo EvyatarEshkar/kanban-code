@@ -1,5 +1,52 @@
 # Changelog
 
+## [0.1.23](https://github.com/langwatch/kanban-code/compare/v0.1.22...v0.1.23) (2026-03-22)
+
+
+### Features
+
+* add in-page browser DevTools via Eruda ([bd709af](https://github.com/langwatch/kanban-code/commit/bd709af4b6f0cd1a252711f161f656bf74f9ba03))
+* add in-page browser DevTools via Eruda ([d8a332b](https://github.com/langwatch/kanban-code/commit/d8a332b440bdf17421e208a9e0b3d438cb961a58))
+* read plan approval options from tmux pane instead of hardcoding ([14555f3](https://github.com/langwatch/kanban-code/commit/14555f37a57b3b55a99371b818fe2e317b4f941b))
+
+
+### Bug Fixes
+
+* Add Link in expanded mode, auto-expand last tool call, terminal flicker ([8480f6c](https://github.com/langwatch/kanban-code/commit/8480f6c798c801712bcaadd4d4a43e6258b94ed3))
+* auto-expand last tool call, scroll on expand, busy indicator, prompt retry ([8d65216](https://github.com/langwatch/kanban-code/commit/8d65216fe5cd445d94fafae10edf26227da1678d))
+* auto-expand uses filtered last turn, fix terminal flicker on card switch ([c1dea9a](https://github.com/langwatch/kanban-code/commit/c1dea9aacf228d6d4b9c2e5edd63e69c0de98432))
+* browser tab scroll not intercepted by terminal scroll handler ([2929e65](https://github.com/langwatch/kanban-code/commit/2929e6570637d9f8cfb6f1932d63d614ecbfa419))
+* clear browser tab selection when new shell tab is created ([d8a3445](https://github.com/langwatch/kanban-code/commit/d8a34458aaef9f370535eb6f19bd30c9ab22b844))
+* Cmd+1-9 tab switching includes browser tabs, fix image popover ([3c26593](https://github.com/langwatch/kanban-code/commit/3c2659300932a92535d4c6aa3a3bf357a0167443))
+* Cmd+W closes browser tabs too, not just shell tabs ([07ace67](https://github.com/langwatch/kanban-code/commit/07ace670be091a881b410269668cbde19a68d69e))
+* dismiss stale pending message on chat view appear ([5756342](https://github.com/langwatch/kanban-code/commit/5756342eafbff5d4741717052f52928d1bb06e58))
+* plan options missing, search perf, scroll on auto-expand ([a68e885](https://github.com/langwatch/kanban-code/commit/a68e885ce431debb4f9082e6287aac926848afc6))
+* remember per-card tab selection, fix stale chat on switch, fix unsent prompts ([5405dad](https://github.com/langwatch/kanban-code/commit/5405dadec6424c63ec2f5ff49d36a361df807b71))
+* resolve unused variable and return statement warnings ([f72a470](https://github.com/langwatch/kanban-code/commit/f72a470023e16c65fe8ffc2d24ad70eee37e2bd6))
+* tab click delay, chat scroll perf, expanded terminal focus ([cfa009d](https://github.com/langwatch/kanban-code/commit/cfa009d0999540a8b2cb0a3e3c470d061fc322ac))
+* validate restored tab selection against live sessions ([02ad278](https://github.com/langwatch/kanban-code/commit/02ad278fb4cfec29d86f8c5dd272f7c3783b2f47))
+
+
+### Performance
+
+* adaptive polling — fast when busy, idle when idle ([5109718](https://github.com/langwatch/kanban-code/commit/5109718cc24fdb404e90099d010ce07c2053f164))
+* cache selectedCard to avoid CardDetailView re-renders ([0f444c3](https://github.com/langwatch/kanban-code/commit/0f444c38231b3a38cf91ebea2dbe76e2e9f63ea6))
+* fine-grained SwiftUI re-renders via @Observable AppState ([903bfb9](https://github.com/langwatch/kanban-code/commit/903bfb9739aa7906c68092cc0cf0332341334e2b))
+* instant terminal response for typing and cursor movement ([17cc0f0](https://github.com/langwatch/kanban-code/commit/17cc0f0fac90b80c0d0abe8fddc1d0f593677c0a))
+* pre-compute per-column card arrays for independent observation ([8f79d6f](https://github.com/langwatch/kanban-code/commit/8f79d6ff334095f68d01ef67c107f1781bfaa7c5))
+
+
+### Refactoring
+
+* extract content tabs and PR helpers from CardDetailView ([787600b](https://github.com/langwatch/kanban-code/commit/787600b594a299c9703808c5eedb508a3c8d0393))
+* extract launch, sync, and worktree logic from ContentView ([75bac83](https://github.com/langwatch/kanban-code/commit/75bac836f6763b11e992bc788dbabe337108fc69))
+* split ChatView.swift and CardDetailView.swift into smaller cohesive files ([8766ccd](https://github.com/langwatch/kanban-code/commit/8766ccddb88ffbf7444924c74f4e05a1e0b3ae08))
+
+
+### Documentation
+
+* add productive-mode screenshot, project's goal and testimonials to README ([ce34c28](https://github.com/langwatch/kanban-code/commit/ce34c2807380b4fdf790a9ca2c17fa2ad5c54fe4))
+
 ## [0.1.22](https://github.com/langwatch/kanban-code/compare/v0.1.21...v0.1.22) (2026-03-19)
 
 
