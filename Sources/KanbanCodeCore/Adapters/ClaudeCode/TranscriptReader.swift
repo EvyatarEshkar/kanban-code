@@ -138,8 +138,12 @@ public enum TranscriptReader {
             ))
         }
 
+        // Merge consecutive assistant entries — Claude Code splits thinking + response
+        // into separate JSONL lines that are parts of the same message.
+        let merged = mergeConsecutiveAssistantTurns(turns)
+
         return ReadResult(
-            turns: turns,
+            turns: merged,
             totalLineCount: -1, // unknown without full scan
             hasMore: turnLineInfos.count > maxTurns || seekPos > 0
         )
@@ -161,6 +165,7 @@ public enum TranscriptReader {
 
                     var lineNumber = 0
                     var turnIndex = 0
+                    var pendingAssistant: ConversationTurn?
 
                     for try await line in handle.bytes.lines {
                         if Task.isCancelled { break }
@@ -191,15 +196,44 @@ public enum TranscriptReader {
 
                         let timestamp = obj["timestamp"] as? String
 
-                        continuation.yield(ConversationTurn(
+                        let turn = ConversationTurn(
                             index: turnIndex,
                             lineNumber: lineNumber,
                             role: role,
                             textPreview: textPreview,
                             timestamp: timestamp,
                             contentBlocks: blocks
-                        ))
-                        turnIndex += 1
+                        )
+
+                        // Merge consecutive assistant turns (thinking + response)
+                        if role == "assistant", var pending = pendingAssistant {
+                            pending = ConversationTurn(
+                                index: pending.index,
+                                lineNumber: pending.lineNumber,
+                                role: pending.role,
+                                textPreview: pending.textPreview == "(empty)" ? textPreview : pending.textPreview,
+                                timestamp: pending.timestamp ?? timestamp,
+                                contentBlocks: pending.contentBlocks + blocks,
+                                imageCount: pending.imageCount + turn.imageCount
+                            )
+                            pendingAssistant = pending
+                        } else {
+                            if let pending = pendingAssistant {
+                                continuation.yield(pending)
+                                turnIndex += 1
+                            }
+                            if role == "assistant" {
+                                pendingAssistant = turn
+                            } else {
+                                pendingAssistant = nil
+                                continuation.yield(turn)
+                                turnIndex += 1
+                            }
+                        }
+                    }
+                    // Flush last pending assistant
+                    if let pending = pendingAssistant {
+                        continuation.yield(pending)
                     }
                 } catch {
                     // File read error — just finish the stream
@@ -327,7 +361,40 @@ public enum TranscriptReader {
             ))
         }
 
-        return turns
+        return mergeConsecutiveAssistantTurns(turns)
+    }
+
+    // MARK: - Consecutive assistant merge
+
+    /// Merge consecutive assistant turns into a single turn.
+    /// Claude Code writes thinking + response as separate JSONL entries
+    /// that are parts of the same message.
+    static func mergeConsecutiveAssistantTurns(_ turns: [ConversationTurn]) -> [ConversationTurn] {
+        guard turns.count > 1 else { return turns }
+        var result: [ConversationTurn] = []
+        var i = 0
+        while i < turns.count {
+            var current = turns[i]
+            // Merge subsequent assistant turns into this one
+            while i + 1 < turns.count
+                    && current.role == "assistant"
+                    && turns[i + 1].role == "assistant" {
+                i += 1
+                let next = turns[i]
+                current = ConversationTurn(
+                    index: current.index,
+                    lineNumber: current.lineNumber,
+                    role: current.role,
+                    textPreview: current.textPreview == "(empty)" ? next.textPreview : current.textPreview,
+                    timestamp: current.timestamp ?? next.timestamp,
+                    contentBlocks: current.contentBlocks + next.contentBlocks,
+                    imageCount: current.imageCount + next.imageCount
+                )
+            }
+            result.append(current)
+            i += 1
+        }
+        return result
     }
 
     // MARK: - User message parsing
@@ -482,7 +549,7 @@ public enum TranscriptReader {
                 result.append(parseToolUse(block))
             case "thinking":
                 if let thinking = block["thinking"] as? String, !thinking.isEmpty {
-                    result.append(ContentBlock(kind: .thinking, text: String(thinking.prefix(500))))
+                    result.append(ContentBlock(kind: .thinking, text: thinking))
                 }
             default:
                 break

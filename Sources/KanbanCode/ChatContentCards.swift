@@ -223,7 +223,9 @@ struct SimpleDiffView: View {
 
 struct ThinkingCard: View {
     let text: String
+    private static let truncationLimit = 2_000
     @State private var isExpanded = false
+    @State private var showFullText = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -241,11 +243,24 @@ struct ThinkingCard: View {
             .buttonStyle(.plain)
 
             if isExpanded {
-                Text(text)
+                let truncated = !showFullText && text.count > Self.truncationLimit
+                let display = truncated ? String(text.prefix(Self.truncationLimit)) : text
+                Text(display)
                     .font(.app(.caption))
                     .foregroundStyle(.secondary)
                     .padding(.top, 4)
                     .textSelection(.enabled)
+                if truncated {
+                    Button {
+                        showFullText = true
+                    } label: {
+                        Text("Show more (\(text.count / 1024)KB)")
+                            .font(.app(.caption2))
+                            .foregroundStyle(Color.accentColor)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 2)
+                }
             }
         }
     }

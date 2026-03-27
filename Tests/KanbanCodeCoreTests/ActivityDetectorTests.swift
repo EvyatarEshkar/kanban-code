@@ -52,12 +52,106 @@ struct ActivityDetectorTests {
         #expect(state == .stale)
     }
 
-    @Test("Notification → needsAttention")
+    @Test("Notification without file path → needsAttention")
     func notification() async {
         let detector = ClaudeCodeActivityDetector()
         await detector.handleHookEvent(HookEvent(sessionId: "s1", eventName: "Notification"))
         let state = await detector.activityState(for: "s1")
         #expect(state == .needsAttention)
+    }
+
+    // MARK: - Stop/Notification + file mtime (resumed work detection)
+
+    @Test("Stop + fresh file → activelyWorking (Claude resumed after stop)")
+    func stopWithFreshFile() async {
+        let detector = ClaudeCodeActivityDetector()
+        await detector.handleHookEvent(HookEvent(sessionId: "s1", eventName: "Stop"))
+
+        let dir = NSTemporaryDirectory() + "kanban-code-stop-fresh-\(UUID().uuidString)"
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let path = (dir as NSString).appendingPathComponent("test.jsonl")
+        // File just modified — Claude is still writing
+        try? "data".write(toFile: path, atomically: true, encoding: .utf8)
+        let _ = await detector.pollActivity(sessionPaths: ["s1": path])
+
+        let state = await detector.activityState(for: "s1")
+        #expect(state == .activelyWorking, "Stop + fresh file means Claude resumed work")
+    }
+
+    @Test("Stop + stale file → needsAttention")
+    func stopWithStaleFile() async {
+        let detector = ClaudeCodeActivityDetector()
+        await detector.handleHookEvent(HookEvent(sessionId: "s1", eventName: "Stop"))
+
+        let dir = NSTemporaryDirectory() + "kanban-code-stop-stale-\(UUID().uuidString)"
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let path = (dir as NSString).appendingPathComponent("test.jsonl")
+        try? "data".write(toFile: path, atomically: true, encoding: .utf8)
+        let staleDate = Date.now.addingTimeInterval(-10)
+        try? FileManager.default.setAttributes([.modificationDate: staleDate], ofItemAtPath: path)
+        let _ = await detector.pollActivity(sessionPaths: ["s1": path])
+
+        let state = await detector.activityState(for: "s1")
+        #expect(state == .needsAttention, "Stop + stale file means Claude is done")
+    }
+
+    @Test("Notification + fresh file → activelyWorking (Claude working during notification)")
+    func notificationWithFreshFile() async {
+        let detector = ClaudeCodeActivityDetector()
+        await detector.handleHookEvent(HookEvent(sessionId: "s1", eventName: "Notification"))
+
+        let dir = NSTemporaryDirectory() + "kanban-code-notif-fresh-\(UUID().uuidString)"
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let path = (dir as NSString).appendingPathComponent("test.jsonl")
+        try? "data".write(toFile: path, atomically: true, encoding: .utf8)
+        let _ = await detector.pollActivity(sessionPaths: ["s1": path])
+
+        let state = await detector.activityState(for: "s1")
+        #expect(state == .activelyWorking, "Notification + fresh file means Claude is still working")
+    }
+
+    @Test("Notification + stale file → needsAttention")
+    func notificationWithStaleFile() async {
+        let detector = ClaudeCodeActivityDetector()
+        await detector.handleHookEvent(HookEvent(sessionId: "s1", eventName: "Notification"))
+
+        let dir = NSTemporaryDirectory() + "kanban-code-notif-stale-\(UUID().uuidString)"
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let path = (dir as NSString).appendingPathComponent("test.jsonl")
+        try? "data".write(toFile: path, atomically: true, encoding: .utf8)
+        let staleDate = Date.now.addingTimeInterval(-10)
+        try? FileManager.default.setAttributes([.modificationDate: staleDate], ofItemAtPath: path)
+        let _ = await detector.pollActivity(sessionPaths: ["s1": path])
+
+        let state = await detector.activityState(for: "s1")
+        #expect(state == .needsAttention, "Notification + stale file means Claude needs attention")
+    }
+
+    @Test("Stop → fresh file → stale file transitions correctly")
+    func stopResumeAndStopAgain() async {
+        let detector = ClaudeCodeActivityDetector()
+        await detector.handleHookEvent(HookEvent(sessionId: "s1", eventName: "Stop"))
+
+        let dir = NSTemporaryDirectory() + "kanban-code-stop-resume-\(UUID().uuidString)"
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let path = (dir as NSString).appendingPathComponent("test.jsonl")
+
+        // File just modified — Claude resumed
+        try? "data".write(toFile: path, atomically: true, encoding: .utf8)
+        let _ = await detector.pollActivity(sessionPaths: ["s1": path])
+        let active = await detector.activityState(for: "s1")
+        #expect(active == .activelyWorking)
+
+        // File goes stale — Claude stopped again
+        let staleDate = Date.now.addingTimeInterval(-10)
+        try? FileManager.default.setAttributes([.modificationDate: staleDate], ofItemAtPath: path)
+        let done = await detector.activityState(for: "s1")
+        #expect(done == .needsAttention)
     }
 
     @Test("Resolve pending stops returns empty (Stop is immediate)")

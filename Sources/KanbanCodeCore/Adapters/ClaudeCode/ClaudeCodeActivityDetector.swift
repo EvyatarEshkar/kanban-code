@@ -127,11 +127,25 @@ public actor ClaudeCodeActivityDetector: ActivityDetector {
             return .idleWaiting
 
         case "Stop":
-            // Stop is the definitive signal — immediately needs attention
+            // Stop means Claude's turn ended, but check if the transcript is still
+            // being written to — Claude may have resumed (e.g. user approved a tool,
+            // or a follow-up turn started without a new UserPromptSubmit hook).
+            if let path = sessionPaths[sessionId],
+               let fileAge = Self.fileAge(path),
+               fileAge < 5 {
+                return .activelyWorking
+            }
             return .needsAttention
         case "SessionEnd":
             return .ended
         case "Notification":
+            // Notification fires during work too (e.g. tool approval requests).
+            // If the transcript is still being written, Claude is working.
+            if let path = sessionPaths[sessionId],
+               let fileAge = Self.fileAge(path),
+               fileAge < 5 {
+                return .activelyWorking
+            }
             return .needsAttention
         default:
             // Unknown hook events — use polled state, never promote to activelyWorking
