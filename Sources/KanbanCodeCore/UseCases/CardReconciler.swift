@@ -99,10 +99,12 @@ public enum CardReconciler {
                         sessionPath: session.jsonlPath
                     )
                     cardIdBySessionId[session.id] = link.id
-                } else {
-                    // Update existing session link
+                } else if link.sessionLink?.sessionId == session.id {
+                    // Same session — update path in case it moved
                     link.sessionLink?.sessionPath = session.jsonlPath
                 }
+                // Different sessionId (e.g., shell tab session) — just mark matched,
+                // don't overwrite the card's primary session.
                 link.lastActivity = session.modifiedTime
                 if link.projectPath == nil, let pp = session.projectPath {
                     link.projectPath = pp
@@ -474,6 +476,22 @@ public enum CardReconciler {
                 for card in tmuxCards {
                     KanbanCodeLog.info("reconciler", "findCard: session=\(session.id.prefix(8)) projectPath=\(projectPath) — tmux card=\(card.id.prefix(12)) has projectPath=\(card.projectPath ?? "nil") (no match)")
                 }
+            }
+        }
+
+        // 4. Match by project path for cards that already have a session + extra shell tabs.
+        //    When the user runs `claude` in a card's shell tab, a new session is created
+        //    in the same project. We match it to the existing card to prevent duplicates.
+        //    The card keeps its original sessionLink — we just suppress a new card.
+        if let projectPath = session.projectPath {
+            for (_, link) in linksById {
+                guard let tmux = link.tmuxLink,
+                      !(tmux.extraSessions ?? []).isEmpty,
+                      link.sessionLink != nil,
+                      (link.projectPath == projectPath || isWorktreeUnder(sessionPath: projectPath, projectRoot: link.projectPath))
+                else { continue }
+                KanbanCodeLog.info("reconciler", "findCard: session=\(session.id.prefix(8)) matched by projectPath+extraShells → card=\(link.id.prefix(12))")
+                return link.id
             }
         }
 

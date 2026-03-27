@@ -1269,6 +1269,103 @@ struct CardReconcilerTests {
         #expect(result.count == 2, "Different sessionIds must not be merged")
     }
 
+    // MARK: - Shell tab session absorption
+
+    @Test("Session started in card's shell tab is absorbed, not duplicated")
+    func shellTabSessionAbsorbed() {
+        // User creates task → launches → runs `claude` in extra shell tab → new session
+        let manualCard = Link(
+            name: "My task",
+            projectPath: "/project",
+            column: .inProgress,
+            source: .manual,
+            sessionLink: SessionLink(sessionId: "s-original", sessionPath: "/p/s-original.jsonl"),
+            tmuxLink: TmuxLink(sessionName: "proj-card1", extraSessions: ["proj-card1-sh1"])
+        )
+
+        let snapshot = CardReconciler.DiscoverySnapshot(
+            sessions: [
+                Session(id: "s-original", projectPath: "/project", messageCount: 10, modifiedTime: .now, jsonlPath: "/p/s-original.jsonl"),
+                Session(id: "s-shell", projectPath: "/project", messageCount: 2, modifiedTime: .now, jsonlPath: "/p/s-shell.jsonl"),
+            ]
+        )
+
+        let result = CardReconciler.reconcile(existing: [manualCard], snapshot: snapshot)
+        #expect(result.count == 1, "Shell tab session should be absorbed, not create a new card")
+        #expect(result[0].id == manualCard.id)
+        #expect(result[0].sessionLink?.sessionId == "s-original", "Original session preserved")
+    }
+
+    @Test("Shell tab session does NOT absorb if card has no extra shells")
+    func noExtraShellsNoAbsorb() {
+        // Card has tmuxLink but no extra sessions — the new session could be from anywhere
+        let manualCard = Link(
+            name: "My task",
+            projectPath: "/project",
+            column: .inProgress,
+            source: .manual,
+            sessionLink: SessionLink(sessionId: "s-original", sessionPath: "/p/s-original.jsonl"),
+            tmuxLink: TmuxLink(sessionName: "proj-card1")
+        )
+
+        let snapshot = CardReconciler.DiscoverySnapshot(
+            sessions: [
+                Session(id: "s-original", projectPath: "/project", messageCount: 10, modifiedTime: .now, jsonlPath: "/p/s-original.jsonl"),
+                Session(id: "s-new", projectPath: "/project", messageCount: 2, modifiedTime: .now, jsonlPath: "/p/s-new.jsonl"),
+            ]
+        )
+
+        let result = CardReconciler.reconcile(existing: [manualCard], snapshot: snapshot)
+        #expect(result.count == 2, "Without extra shells, new session creates a new card")
+    }
+
+    @Test("Shell tab session in worktree project is absorbed")
+    func shellTabWorktreeAbsorbed() {
+        let card = Link(
+            name: "Worktree task",
+            projectPath: "/project",
+            column: .inProgress,
+            source: .manual,
+            sessionLink: SessionLink(sessionId: "s1", sessionPath: "/p/s1.jsonl"),
+            tmuxLink: TmuxLink(sessionName: "proj-card1", extraSessions: ["proj-card1-sh1"]),
+            worktreeLink: WorktreeLink(path: "/project/.claude/worktrees/feat", branch: "feat")
+        )
+
+        let snapshot = CardReconciler.DiscoverySnapshot(
+            sessions: [
+                Session(id: "s1", projectPath: "/project/.claude/worktrees/feat", messageCount: 10, modifiedTime: .now, jsonlPath: "/p/s1.jsonl"),
+                // New session started in shell tab, same worktree path
+                Session(id: "s2", projectPath: "/project/.claude/worktrees/feat", messageCount: 1, modifiedTime: .now, jsonlPath: "/p/s2.jsonl"),
+            ]
+        )
+
+        let result = CardReconciler.reconcile(existing: [card], snapshot: snapshot)
+        #expect(result.count == 1, "Shell tab session in same worktree absorbed")
+        #expect(result[0].sessionLink?.sessionId == "s1", "Original session preserved")
+    }
+
+    @Test("Different project sessions are NOT absorbed even with extra shells")
+    func differentProjectNotAbsorbed() {
+        let card = Link(
+            name: "My task",
+            projectPath: "/project-a",
+            column: .inProgress,
+            source: .manual,
+            sessionLink: SessionLink(sessionId: "s1", sessionPath: "/p/s1.jsonl"),
+            tmuxLink: TmuxLink(sessionName: "proj-card1", extraSessions: ["proj-card1-sh1"])
+        )
+
+        let snapshot = CardReconciler.DiscoverySnapshot(
+            sessions: [
+                Session(id: "s1", projectPath: "/project-a", messageCount: 10, modifiedTime: .now, jsonlPath: "/p/s1.jsonl"),
+                Session(id: "s-other", projectPath: "/project-b", messageCount: 2, modifiedTime: .now, jsonlPath: "/p/s-other.jsonl"),
+            ]
+        )
+
+        let result = CardReconciler.reconcile(existing: [card], snapshot: snapshot)
+        #expect(result.count == 2, "Different project = different card")
+    }
+
     @Test("Duplicate sessionId merge is idempotent")
     func duplicateSessionIdIdempotent() {
         let manualCard = Link(
