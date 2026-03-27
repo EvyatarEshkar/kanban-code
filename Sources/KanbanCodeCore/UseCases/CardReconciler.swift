@@ -300,6 +300,41 @@ public enum CardReconciler {
             cardIdsByBranch[branch] = cardIds.filter { !orphanIds.contains($0) || $0 == keeperId }
         }
 
+        // B3. Merge duplicate sessionId cards.
+        // Race condition: reconcile discovers a session file before the manual/launched card
+        // gets its sessionLink. Both cards end up with the same sessionId.
+        // Keep the "richer" card (manual/named), absorb the discovered duplicate.
+        var sessionIdToCards: [String: [String]] = [:]
+        for (id, link) in linksById {
+            guard let sid = link.sessionLink?.sessionId else { continue }
+            sessionIdToCards[sid, default: []].append(id)
+        }
+        for (sid, cardIds) in sessionIdToCards where cardIds.count > 1 {
+            // Pick the keeper: prefer manual source, then named, then earliest created
+            let sorted = cardIds.sorted { a, b in
+                let la = linksById[a]!, lb = linksById[b]!
+                if la.source == .manual && lb.source != .manual { return true }
+                if la.source != .manual && lb.source == .manual { return false }
+                if la.name != nil && lb.name == nil { return true }
+                if la.name == nil && lb.name != nil { return false }
+                if la.tmuxLink != nil && lb.tmuxLink == nil { return true }
+                if la.tmuxLink == nil && lb.tmuxLink != nil { return false }
+                return la.createdAt < lb.createdAt
+            }
+            let keeperId = sorted[0]
+            var keeper = linksById[keeperId]!
+            for dupId in sorted.dropFirst() {
+                if let dup = linksById[dupId] {
+                    if keeper.worktreeLink == nil { keeper.worktreeLink = dup.worktreeLink }
+                    if keeper.tmuxLink == nil { keeper.tmuxLink = dup.tmuxLink }
+                    if keeper.name == nil { keeper.name = dup.name }
+                    KanbanCodeLog.info("reconciler", "Dedup: merging duplicate sessionId=\(sid.prefix(8)) card \(dupId.prefix(12)) into \(keeperId.prefix(12))")
+                }
+                linksById.removeValue(forKey: dupId)
+            }
+            linksById[keeperId] = keeper
+        }
+
         // C. Match PRs to existing cards via branch (add or update)
         for (branch, pr) in snapshot.pullRequests {
             let cardIds = cardIdsByBranch[branch] ?? []

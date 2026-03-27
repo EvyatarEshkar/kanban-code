@@ -1145,4 +1145,151 @@ struct CardReconcilerTests {
         // but the worktree is in /repos/langwatch — repo mismatch
         #expect(card.worktreeLink == nil)
     }
+
+    // MARK: - Duplicate sessionId merge
+
+    @Test("Two cards with same sessionId are merged — manual card wins")
+    func duplicateSessionIdMerge() {
+        // Race condition: manual card launched, reconcile discovers session before
+        // launchCompleted fires → creates duplicate discovered card.
+        let manualCard = Link(
+            name: "My task",
+            projectPath: "/project",
+            column: .waiting,
+            source: .manual,
+            sessionLink: SessionLink(sessionId: "s1", sessionPath: "/p/s1.jsonl"),
+            worktreeLink: WorktreeLink(path: "/project/.wt/feat", branch: "feat")
+        )
+        let discoveredCard = Link(
+            projectPath: "/project",
+            column: .allSessions,
+            source: .discovered,
+            sessionLink: SessionLink(sessionId: "s1", sessionPath: "/p/s1.jsonl"),
+            worktreeLink: WorktreeLink(path: "/project/.wt/feat", branch: "feat")
+        )
+
+        let snapshot = CardReconciler.DiscoverySnapshot(
+            sessions: [Session(id: "s1", messageCount: 5, modifiedTime: .now, jsonlPath: "/p/s1.jsonl")]
+        )
+
+        let result = CardReconciler.reconcile(existing: [manualCard, discoveredCard], snapshot: snapshot)
+        #expect(result.count == 1, "Duplicate sessionId cards should be merged")
+        #expect(result[0].id == manualCard.id, "Manual card should be the keeper")
+        #expect(result[0].name == "My task")
+        #expect(result[0].sessionLink?.sessionId == "s1")
+        #expect(result[0].worktreeLink?.branch == "feat")
+    }
+
+    @Test("Duplicate sessionId merge: named card wins over unnamed")
+    func duplicateSessionIdNamedWins() {
+        let namedCard = Link(
+            name: "Important work",
+            projectPath: "/project",
+            column: .waiting,
+            source: .discovered,
+            sessionLink: SessionLink(sessionId: "s1", sessionPath: "/p/s1.jsonl")
+        )
+        let unnamedCard = Link(
+            projectPath: "/project",
+            column: .allSessions,
+            source: .discovered,
+            sessionLink: SessionLink(sessionId: "s1", sessionPath: "/p/s1.jsonl"),
+            tmuxLink: TmuxLink(sessionName: "proj-task")
+        )
+
+        let snapshot = CardReconciler.DiscoverySnapshot(
+            sessions: [Session(id: "s1", messageCount: 5, modifiedTime: .now, jsonlPath: "/p/s1.jsonl")]
+        )
+
+        let result = CardReconciler.reconcile(existing: [namedCard, unnamedCard], snapshot: snapshot)
+        #expect(result.count == 1)
+        #expect(result[0].name == "Important work")
+        // tmuxLink absorbed from the other card
+        #expect(result[0].tmuxLink?.sessionName == "proj-task")
+    }
+
+    @Test("Duplicate sessionId merge: tmuxLink is absorbed into keeper")
+    func duplicateSessionIdTmuxAbsorbed() {
+        let manualCard = Link(
+            name: "My task",
+            projectPath: "/project",
+            column: .inProgress,
+            source: .manual,
+            sessionLink: SessionLink(sessionId: "s1", sessionPath: "/p/s1.jsonl"),
+            tmuxLink: TmuxLink(sessionName: "proj-manual")
+        )
+        let discoveredCard = Link(
+            projectPath: "/project",
+            column: .allSessions,
+            source: .discovered,
+            sessionLink: SessionLink(sessionId: "s1", sessionPath: "/p/s1.jsonl"),
+            worktreeLink: WorktreeLink(path: "/project/.wt/feat", branch: "feat")
+        )
+
+        let snapshot = CardReconciler.DiscoverySnapshot(
+            sessions: [Session(id: "s1", messageCount: 5, modifiedTime: .now, jsonlPath: "/p/s1.jsonl")]
+        )
+
+        let result = CardReconciler.reconcile(existing: [manualCard, discoveredCard], snapshot: snapshot)
+        #expect(result.count == 1)
+        #expect(result[0].id == manualCard.id)
+        #expect(result[0].tmuxLink?.sessionName == "proj-manual") // Already had tmuxLink
+        #expect(result[0].worktreeLink?.branch == "feat") // Absorbed from discovered
+    }
+
+    @Test("Different sessionIds are NOT merged even on same worktree")
+    func differentSessionIdsNotMerged() {
+        // Two legitimate cards on the same worktree (e.g., fork with keepWorktree).
+        // Different sessionIds → must NOT merge.
+        let card1 = Link(
+            name: "Original",
+            projectPath: "/project",
+            column: .inProgress,
+            source: .manual,
+            sessionLink: SessionLink(sessionId: "s1", sessionPath: "/p/s1.jsonl"),
+            worktreeLink: WorktreeLink(path: "/project/.wt/feat", branch: "feat")
+        )
+        let card2 = Link(
+            name: "Fork",
+            projectPath: "/project",
+            column: .waiting,
+            source: .discovered,
+            sessionLink: SessionLink(sessionId: "s2", sessionPath: "/p/s2.jsonl"),
+            worktreeLink: WorktreeLink(path: "/project/.wt/feat", branch: "feat")
+        )
+
+        let snapshot = CardReconciler.DiscoverySnapshot(
+            sessions: [
+                Session(id: "s1", messageCount: 5, modifiedTime: .now, jsonlPath: "/p/s1.jsonl"),
+                Session(id: "s2", messageCount: 3, modifiedTime: .now, jsonlPath: "/p/s2.jsonl"),
+            ]
+        )
+
+        let result = CardReconciler.reconcile(existing: [card1, card2], snapshot: snapshot)
+        #expect(result.count == 2, "Different sessionIds must not be merged")
+    }
+
+    @Test("Duplicate sessionId merge is idempotent")
+    func duplicateSessionIdIdempotent() {
+        let manualCard = Link(
+            name: "Task",
+            projectPath: "/project",
+            column: .inProgress,
+            source: .manual,
+            sessionLink: SessionLink(sessionId: "s1", sessionPath: "/p/s1.jsonl"),
+            tmuxLink: TmuxLink(sessionName: "proj-t"),
+            worktreeLink: WorktreeLink(path: "/project/.wt/feat", branch: "feat")
+        )
+
+        let snapshot = CardReconciler.DiscoverySnapshot(
+            sessions: [Session(id: "s1", messageCount: 5, modifiedTime: .now, jsonlPath: "/p/s1.jsonl")]
+        )
+
+        // After first reconcile, only one card exists. Running again should be stable.
+        let first = CardReconciler.reconcile(existing: [manualCard], snapshot: snapshot)
+        #expect(first.count == 1)
+        let second = CardReconciler.reconcile(existing: first, snapshot: snapshot)
+        #expect(second.count == 1)
+        #expect(first[0].id == second[0].id)
+    }
 }
