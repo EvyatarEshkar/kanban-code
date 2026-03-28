@@ -7,8 +7,9 @@ struct ListBoardView: View {
     @State private var dragState = DragState()
     var onStartCard: (String) -> Void = { _ in }
     var onResumeCard: (String) -> Void = { _ in }
-    var onForkCard: (String) -> Void = { _ in }
+    var onForkCard: (String, Bool) -> Void = { _, _ in }
     var onCopyResumeCmd: (String) -> Void = { _ in }
+    var onDiscoverCard: (String) -> Void = { _ in }
     var onCleanupWorktree: (String) -> Void = { _ in }
     var canCleanupWorktree: (String) -> Bool = { _ in true }
     var onArchiveCard: (String) -> Void = { _ in }
@@ -81,6 +82,7 @@ struct ListBoardView: View {
             onResumeCard: onResumeCard,
             onForkCard: onForkCard,
             onCopyResumeCmd: onCopyResumeCmd,
+            onDiscoverCard: onDiscoverCard,
             onCleanupWorktree: onCleanupWorktree,
             canCleanupWorktree: canCleanupWorktree,
             onArchiveCard: onArchiveCard,
@@ -184,8 +186,9 @@ private struct ListBoardSectionView: View {
     let onSelectCard: (String) -> Void
     let onStartCard: (String) -> Void
     let onResumeCard: (String) -> Void
-    let onForkCard: (String) -> Void
+    let onForkCard: (String, Bool) -> Void
     let onCopyResumeCmd: (String) -> Void
+    let onDiscoverCard: (String) -> Void
     let onCleanupWorktree: (String) -> Void
     let canCleanupWorktree: (String) -> Bool
     let onArchiveCard: (String) -> Void
@@ -295,8 +298,9 @@ private struct ListBoardSectionView: View {
                         onSelect: { onSelectCard(card.id) },
                         onStart: { onStartCard(card.id) },
                         onResume: { onResumeCard(card.id) },
-                        onFork: { onForkCard(card.id) },
+                        onFork: { keepWorktree in onForkCard(card.id, keepWorktree) },
                         onCopyResumeCmd: { onCopyResumeCmd(card.id) },
+                        onDiscover: { onDiscoverCard(card.id) },
                         onCleanupWorktree: { onCleanupWorktree(card.id) },
                         canCleanupWorktree: canCleanupWorktree(card.id),
                         onArchive: { onArchiveCard(card.id) },
@@ -484,8 +488,9 @@ private struct ListCardRowView: View {
     var onSelect: () -> Void = {}
     var onStart: () -> Void = {}
     var onResume: () -> Void = {}
-    var onFork: () -> Void = {}
+    var onFork: (_ keepWorktree: Bool) -> Void = { _ in }
     var onCopyResumeCmd: () -> Void = {}
+    var onDiscover: () -> Void = {}
     var onCleanupWorktree: () -> Void = {}
     var canCleanupWorktree: Bool = true
     var onArchive: () -> Void = {}
@@ -496,8 +501,6 @@ private struct ListCardRowView: View {
     var enabledAssistants: [CodingAssistant] = []
     var onMigrateAssistant: (CodingAssistant) -> Void = { _ in }
     var onRename: (String) -> Void = { _ in } // newName
-    @State private var showRename = false
-    @State private var renameText = ""
 
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
@@ -564,107 +567,24 @@ private struct ListCardRowView: View {
         .contentShape(RoundedRectangle(cornerRadius: 8))
         .onTapGesture { onSelect() }
         .contextMenu {
-            if card.column == .backlog {
-                Button(action: onStart) {
-                    Label("Start", systemImage: "play.fill")
-                }
-            }
-            if card.column != .backlog {
-                Button(action: onResume) {
-                    Label("Resume Session", systemImage: "play.fill")
-                }
-            }
-            Button(action: onFork) {
-                Label("Fork Session", systemImage: "arrow.branch")
-            }
-            Button {
-                renameText = card.link.name ?? card.displayTitle
-                showRename = true
-            } label: {
-                Label("Rename", systemImage: "pencil")
-            }
-            Button(action: onCopyResumeCmd) {
-                Label("Copy Resume Command", systemImage: "doc.on.doc")
-            }
-            Divider()
-            ForEach(card.link.prLinks, id: \.number) { pr in
-                Button {
-                    if let url = pr.url.flatMap({ URL(string: $0) }) {
-                        NSWorkspace.shared.open(url)
-                    }
-                } label: {
-                    Label("Open PR #\(pr.number)", systemImage: "arrow.up.right.square")
-                }
-            }
-            if let issue = card.link.issueLink {
-                Button {
-                    if let url = issue.url.flatMap({ URL(string: $0) }) {
-                        NSWorkspace.shared.open(url)
-                    }
-                } label: {
-                    Label("Open Issue #\(issue.number)", systemImage: "arrow.up.right.square")
-                }
-            }
-            if card.link.worktreeLink != nil, canCleanupWorktree {
-                Divider()
-                Button(role: .destructive, action: onCleanupWorktree) {
-                    Label("Cleanup Worktree", systemImage: "trash")
-                }
-            }
-            if card.link.sessionLink != nil {
-                let currentPath = card.link.projectPath
-                let otherProjects = availableProjects.filter { $0.path != currentPath }
-                Divider()
-                Menu {
-                    ForEach(otherProjects, id: \.path) { project in
-                        Button(project.name) {
-                            onMoveToProject(project.path)
-                        }
-                    }
-                    if !otherProjects.isEmpty {
-                        Divider()
-                    }
-                    Button("Select Folder...") {
-                        onMoveToFolder()
-                    }
-                } label: {
-                    Label("Move to Project", systemImage: "folder.badge.arrow.forward")
-                }
-            }
-            if card.link.sessionLink != nil {
-                let migrationTargets = enabledAssistants.filter { $0 != card.link.effectiveAssistant }
-                if !migrationTargets.isEmpty {
-                    Divider()
-                    Menu {
-                        ForEach(migrationTargets, id: \.rawValue) { target in
-                            Button(target.displayName) {
-                                onMigrateAssistant(target)
-                            }
-                        }
-                    } label: {
-                        Label("Migrate to Assistant", systemImage: "arrow.triangle.swap")
-                    }
-                }
-            }
-            Divider()
-            if card.link.manuallyArchived {
-                if card.link.source != .githubIssue {
-                    Button(role: .destructive, action: onDelete) {
-                        Label("Delete Card", systemImage: "trash")
-                    }
-                }
-            } else {
-                Button(action: onArchive) {
-                    Label("Archive", systemImage: "archivebox")
-                }
-            }
-        }
-        .alert("Rename", isPresented: $showRename) {
-            TextField("Name", text: $renameText)
-            Button("Cancel", role: .cancel) {}
-            Button("Rename") {
-                onRename(renameText.trimmingCharacters(in: .whitespacesAndNewlines))
-            }
+            CardActionsMenu(
+                card: card,
+                onStart: onStart,
+                onResume: onResume,
+                onFork: onFork,
+                onRename: onRename,
+                onCopyResumeCmd: onCopyResumeCmd,
+                onDiscover: onDiscover,
+                onCleanupWorktree: onCleanupWorktree,
+                canCleanupWorktree: canCleanupWorktree,
+                onArchive: onArchive,
+                onDelete: onDelete,
+                availableProjects: availableProjects,
+                onMoveToProject: onMoveToProject,
+                onMoveToFolder: onMoveToFolder,
+                enabledAssistants: enabledAssistants,
+                onMigrateAssistant: onMigrateAssistant
+            )
         }
     }
 }

@@ -6,8 +6,9 @@ struct BoardView: View {
     @State private var dragState = DragState()
     var onStartCard: (String) -> Void = { _ in }
     var onResumeCard: (String) -> Void = { _ in }
-    var onForkCard: (String) -> Void = { _ in }
+    var onForkCard: (String, Bool) -> Void = { _, _ in }
     var onCopyResumeCmd: (String) -> Void = { _ in }
+    var onDiscoverCard: (String) -> Void = { _ in }
     var onCleanupWorktree: (String) -> Void = { _ in }
     var canCleanupWorktree: (String) -> Bool = { _ in true }
     var onArchiveCard: (String) -> Void = { _ in }
@@ -64,6 +65,7 @@ struct BoardView: View {
                             onResumeCard: onResumeCard,
                             onForkCard: onForkCard,
                             onCopyResumeCmd: onCopyResumeCmd,
+                            onDiscoverCard: onDiscoverCard,
                             onCleanupWorktree: onCleanupWorktree,
                             canCleanupWorktree: canCleanupWorktree,
                             onDeleteCard: onDeleteCard,

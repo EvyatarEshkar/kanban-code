@@ -37,8 +37,9 @@ struct DroppableColumnView: View {
     var onArchiveCard: (String) -> Void = { _ in }
     var onStartCard: (String) -> Void = { _ in }
     var onResumeCard: (String) -> Void = { _ in }
-    var onForkCard: (String) -> Void = { _ in }
+    var onForkCard: (String, Bool) -> Void = { _, _ in }
     var onCopyResumeCmd: (String) -> Void = { _ in }
+    var onDiscoverCard: (String) -> Void = { _ in }
     var onCleanupWorktree: (String) -> Void = { _ in }
     var canCleanupWorktree: (String) -> Bool = { _ in true }
     var onDeleteCard: (String) -> Void = { _ in }
@@ -52,7 +53,6 @@ struct DroppableColumnView: View {
     var onColumnBackgroundClick: (KanbanCodeColumn) -> Void = { _ in }
 
     @State private var isTargeted = false
-    @State private var renamingCardId: String?
     @State private var cardFrames: [String: CGRect] = [:]
 
     private var isCurrentDropAllowed: Bool {
@@ -78,31 +78,7 @@ struct DroppableColumnView: View {
                         ReorderIndicator()
                     }
 
-                    CardView(
-                        card: card,
-                        isSelected: card.id == selectedCardId,
-                        onSelect: {
-                            let newId = selectedCardId == card.id ? nil : card.id
-                            selectedCardId = newId
-                            if newId != nil { onCardClicked(card.id) }
-                        },
-                        onStart: { onStartCard(card.id) },
-                        onResume: { onResumeCard(card.id) },
-                        onFork: { onForkCard(card.id) },
-                        onRename: {
-                            renamingCardId = card.id
-                        },
-                        onCopyResumeCmd: { onCopyResumeCmd(card.id) },
-                        onCleanupWorktree: { onCleanupWorktree(card.id) },
-                        canCleanupWorktree: canCleanupWorktree(card.id),
-                        onArchive: { onArchiveCard(card.id) },
-                        onDelete: { onDeleteCard(card.id) },
-                        availableProjects: availableProjects,
-                        onMoveToProject: { projectPath in onMoveToProject(card.id, projectPath) },
-                        onMoveToFolder: { onMoveToFolder(card.id) },
-                        enabledAssistants: enabledAssistants,
-                        onMigrateAssistant: { target in onMigrateAssistant(card.id, target) }
-                    )
+                    cardView(for: card)
                     // Merge highlight
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
@@ -136,22 +112,6 @@ struct DroppableColumnView: View {
                         dragState.sourceColumn = column
                         return NSItemProvider(object: card.id as NSString)
                     }
-                    .sheet(isPresented: Binding(
-                        get: { renamingCardId == card.id },
-                        set: { if !$0 { renamingCardId = nil } }
-                    )) {
-                        RenameSessionDialog(
-                            currentName: card.link.name ?? card.displayTitle,
-                            isPresented: Binding(
-                                get: { renamingCardId == card.id },
-                                set: { if !$0 { renamingCardId = nil } }
-                            ),
-                            onRename: { name in
-                                onRenameCard(card.id, name)
-                            }
-                        )
-                    }
-
                     // Drop indicator below this card
                     if dragState.reorderTargetId == card.id && !dragState.reorderAbove {
                         ReorderIndicator()
@@ -268,6 +228,33 @@ struct DroppableColumnView: View {
         guard !tappedCard else { return }
 
         onColumnBackgroundClick(column)
+    }
+
+    private func cardView(for card: KanbanCodeCard) -> CardView {
+        CardView(
+            card: card,
+            isSelected: card.id == selectedCardId,
+            onSelect: {
+                let newId = selectedCardId == card.id ? nil : card.id
+                selectedCardId = newId
+                if newId != nil { onCardClicked(card.id) }
+            },
+            onStart: { onStartCard(card.id) },
+            onResume: { onResumeCard(card.id) },
+            onFork: { keepWorktree in onForkCard(card.id, keepWorktree) },
+            onRename: { newName in onRenameCard(card.id, newName) },
+            onCopyResumeCmd: { onCopyResumeCmd(card.id) },
+            onDiscover: { onDiscoverCard(card.id) },
+            onCleanupWorktree: { onCleanupWorktree(card.id) },
+            canCleanupWorktree: canCleanupWorktree(card.id),
+            onArchive: { onArchiveCard(card.id) },
+            onDelete: { onDeleteCard(card.id) },
+            availableProjects: availableProjects,
+            onMoveToProject: { projectPath in onMoveToProject(card.id, projectPath) },
+            onMoveToFolder: { onMoveToFolder(card.id) },
+            enabledAssistants: enabledAssistants,
+            onMigrateAssistant: { target in onMigrateAssistant(card.id, target) }
+        )
     }
 }
 

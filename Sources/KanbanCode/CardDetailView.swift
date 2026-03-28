@@ -262,7 +262,7 @@ struct CardDetailView: View {
             knownShellCount = card.link.tmuxLink?.extraSessions?.count ?? 0
         }
         .task(id: card.id) {
-            actionsMenuProvider?.builder = { [self] in buildActionsMenu() }
+            // actionsMenuProvider is no longer used — the Menu is built directly in actionsMenuButton
             isLoadingHistory = false
             isLoadingMore = false
             hasMoreTurns = false
@@ -1449,159 +1449,43 @@ struct CardDetailView: View {
     }
 
     private var actionsMenuButton: some View {
-        NSMenuButton {
+        Menu {
+            CardActionsMenu(
+                card: card,
+                showBranchInfo: isExpanded,
+                githubBaseURL: githubBaseURL,
+                onStart: { onResume() },
+                onResume: { onResume() },
+                onFork: onFork,
+                onRename: { newName in
+                    onRename(newName.isEmpty ? "" : newName)
+                },
+                onCopyResumeCmd: { copyResumeCommand() },
+                onCheckpoint: {
+                    checkpointMode = true
+                    selectedTab = .history
+                },
+                onAddLink: isExpanded ? { showAddLink = true } : nil,
+                onUnlink: isExpanded ? onUnlink : nil,
+                onDiscover: onDiscover,
+                onCleanupWorktree: onCleanupWorktree,
+                canCleanupWorktree: canCleanupWorktree,
+                onDelete: { onDeleteCard(); onDismiss() },
+                availableProjects: availableProjects,
+                onMoveToProject: onMoveToProject,
+                onMoveToFolder: onMoveToFolder,
+                enabledAssistants: enabledAssistants,
+                onMigrateAssistant: onMigrateAssistant
+            )
+        } label: {
             Image(systemName: "ellipsis")
                 .font(.app(.caption))
                 .frame(width: CGFloat(36).scaled, height: CGFloat(36).scaled)
                 .contentShape(Circle())
-        } menuItems: {
-            buildActionsMenu()
         }
-    }
-
-    private func buildActionsMenu() -> NSMenu {
-        let menu = NSMenu()
-
-        if isExpanded {
-            // Card info section — replaces the inspector header in expanded mode
-            if let branch = card.link.worktreeLink?.branch ?? card.link.discoveredBranches?.first, !branch.isEmpty {
-                let branchItem = NSMenuItem(title: "Branch: \(branch)", action: nil, keyEquivalent: "")
-                branchItem.image = NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: nil)
-                let branchSub = NSMenu()
-                branchSub.addActionItem("Copy Branch Name") { [self] in copyToClipboard(branch) }
-                if card.link.worktreeLink != nil {
-                    branchSub.addActionItem("Unlink Branch") { [self] in onUnlink(.worktree) }
-                }
-                branchItem.submenu = branchSub
-                menu.addItem(branchItem)
-            }
-            for pr in card.link.prLinks {
-                let detail = pr.status.map { " · \($0.rawValue)" } ?? ""
-                let prItem = NSMenuItem(title: "PR: #\(pr.number)\(detail)", action: nil, keyEquivalent: "")
-                prItem.image = NSImage(systemSymbolName: "arrow.triangle.pull", accessibilityDescription: nil)
-                let prSub = NSMenu()
-                if let url = pr.url.flatMap({ URL(string: $0) }) {
-                    prSub.addActionItem("Open on GitHub") { NSWorkspace.shared.open(url) }
-                }
-                prSub.addActionItem("Copy PR Number") { [self] in copyToClipboard("#\(pr.number)") }
-                prSub.addActionItem("Unlink PR") { [self] in onUnlink(.pr(number: pr.number)) }
-                prItem.submenu = prSub
-                menu.addItem(prItem)
-            }
-            if let issue = card.link.issueLink {
-                let issueItem = NSMenuItem(title: "Issue: #\(issue.number)", action: nil, keyEquivalent: "")
-                issueItem.image = NSImage(systemSymbolName: "circle.circle", accessibilityDescription: nil)
-                let issueSub = NSMenu()
-                if let url = (issue.url ?? githubBaseURL.map { GitRemoteResolver.issueURL(base: $0, number: issue.number) }).flatMap({ URL(string: $0) }) {
-                    issueSub.addActionItem("Open on GitHub") { NSWorkspace.shared.open(url) }
-                }
-                issueSub.addActionItem("Copy Issue Number") { [self] in copyToClipboard("#\(issue.number)") }
-                issueSub.addActionItem("Unlink Issue") { [self] in onUnlink(.issue) }
-                issueItem.submenu = issueSub
-                menu.addItem(issueItem)
-            }
-            menu.addActionItem("Add Link", image: "plus") { [self] in showAddLink = true }
-            menu.addItem(NSMenuItem.separator())
-        }
-
-        menu.addActionItem("Rename", image: "pencil") { [self] in showRenameSheet = true }
-
-        let forkItem = menu.addActionItem("Fork Session", image: "arrow.branch") { [self] in onFork(true) }
-        forkItem.isEnabled = card.link.sessionLink?.sessionPath != nil
-
-        let cpItem = menu.addActionItem("Checkpoint / Restore", image: "clock.arrow.circlepath") { [self] in
-            checkpointMode = true
-            selectedTab = .history
-        }
-        cpItem.isEnabled = card.link.sessionLink?.sessionPath != nil && !turns.isEmpty
-
-        menu.addItem(NSMenuItem.separator())
-
-        menu.addActionItem("Copy Resume Command", image: "doc.on.doc") { [self] in copyResumeCommand() }
-        menu.addActionItem("Copy Card ID", image: "number") { [self] in copyToClipboard(card.id) }
-
-        if let sessionId = card.link.sessionLink?.sessionId {
-            let sessionItem = menu.addActionItem("Copy Session ID") { [self] in copyToClipboard(sessionId) }
-            if let img = AssistantIcon.menuImage(for: card.link.effectiveAssistant) {
-                sessionItem.image = img
-            }
-        }
-
-        if let tmux = card.link.tmuxLink?.sessionName {
-            menu.addActionItem("Copy Tmux Command", image: "terminal") { [self] in copyToClipboard("tmux attach -t \(tmux)") }
-        }
-
-        if let projectPath = card.link.projectPath {
-            menu.addActionItem("Copy Project Path", image: "folder.badge.gearshape") { [self] in copyToClipboard(projectPath) }
-        }
-        if let worktreePath = card.link.worktreeLink?.path, !worktreePath.isEmpty {
-            menu.addActionItem("Copy Worktree Path", image: "folder") { [self] in copyToClipboard(worktreePath) }
-        }
-
-        if !card.link.prLinks.isEmpty {
-            menu.addItem(NSMenuItem.separator())
-            for pr in card.link.prLinks {
-                menu.addActionItem("Open PR #\(pr.number)", image: "arrow.up.right.square") {
-                    if let url = pr.url.flatMap({ URL(string: $0) }) { NSWorkspace.shared.open(url) }
-                }
-            }
-        }
-
-        if card.link.sessionLink != nil || card.link.worktreeLink != nil {
-            menu.addItem(NSMenuItem.separator())
-            menu.addActionItem("Discover Branch", image: "arrow.triangle.pull") { [self] in onDiscover() }
-        }
-
-        if let issue = card.link.issueLink {
-            menu.addActionItem("Open Issue #\(issue.number)", image: "arrow.up.right.square") {
-                if let url = issue.url.flatMap({ URL(string: $0) }) { NSWorkspace.shared.open(url) }
-            }
-        }
-
-        if card.link.worktreeLink != nil, canCleanupWorktree {
-            menu.addItem(NSMenuItem.separator())
-            menu.addActionItem("Cleanup Worktree", image: "trash") { [self] in onCleanupWorktree() }
-        }
-
-        if card.link.sessionLink != nil {
-            let currentPath = card.link.projectPath
-            let otherProjects = availableProjects.filter { $0.path != currentPath }
-            menu.addItem(NSMenuItem.separator())
-            let moveItem = NSMenuItem(title: "Move to Project", action: nil, keyEquivalent: "")
-            moveItem.image = NSImage(systemSymbolName: "folder.badge.arrow.forward", accessibilityDescription: nil)
-            let submenu = NSMenu()
-            for project in otherProjects {
-                let item = submenu.addActionItem(project.name) { [self] in onMoveToProject(project.path) }
-                _ = item
-            }
-            if !otherProjects.isEmpty {
-                submenu.addItem(NSMenuItem.separator())
-            }
-            submenu.addActionItem("Select Folder...") { [self] in onMoveToFolder() }
-            moveItem.submenu = submenu
-            menu.addItem(moveItem)
-        }
-
-        if card.link.sessionLink != nil {
-            let migrationTargets = enabledAssistants.filter { $0 != card.link.effectiveAssistant }
-            if !migrationTargets.isEmpty {
-                menu.addItem(NSMenuItem.separator())
-                let migrateItem = NSMenuItem(title: "Migrate to Assistant", action: nil, keyEquivalent: "")
-                migrateItem.image = NSImage(systemSymbolName: "arrow.triangle.swap", accessibilityDescription: nil)
-                let migrateSubmenu = NSMenu()
-                for target in migrationTargets {
-                    let item = migrateSubmenu.addActionItem(target.displayName) { [self] in onMigrateAssistant(target) }
-                    _ = item
-                }
-                migrateItem.submenu = migrateSubmenu
-                menu.addItem(migrateItem)
-            }
-        }
-
-        menu.addItem(NSMenuItem.separator())
-        menu.addActionItem("Delete Card", image: "trash") { [self] in onDeleteCard(); onDismiss() }
-
-        return menu
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
     }
 
     // MARK: - History loading

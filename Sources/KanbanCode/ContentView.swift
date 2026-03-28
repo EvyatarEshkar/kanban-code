@@ -292,7 +292,7 @@ struct ContentView: View {
             store: store,
             onStartCard: { cardId in startCard(cardId: cardId) },
             onResumeCard: { cardId in resumeCard(cardId: cardId) },
-            onForkCard: { cardId in store.dispatch(.showDialog(.confirmFork(cardId: cardId))) },
+            onForkCard: { cardId, _ in store.dispatch(.showDialog(.confirmFork(cardId: cardId))) },
             onCopyResumeCmd: { cardId in
                 guard let card = store.state.cards.first(where: { $0.id == cardId }) else { return }
                 var cmd = ""
@@ -304,6 +304,16 @@ struct ContentView: View {
                 }
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(cmd, forType: .string)
+            },
+            onDiscoverCard: { cardId in
+                Task {
+                    store.dispatch(.setBusy(cardId: cardId, busy: true))
+                    if let updatedLink = await orchestrator.discoverBranchesForCard(cardId: cardId) {
+                        store.dispatch(.createManualTask(updatedLink))
+                    }
+                    await store.reconcile()
+                    store.dispatch(.setBusy(cardId: cardId, busy: false))
+                }
             },
             onCleanupWorktree: { cardId in Task { await cleanupWorktree(cardId: cardId) } },
             canCleanupWorktree: { cardId in
@@ -348,7 +358,7 @@ struct ContentView: View {
             store: store,
             onStartCard: { cardId in startCard(cardId: cardId) },
             onResumeCard: { cardId in resumeCard(cardId: cardId) },
-            onForkCard: { cardId in store.dispatch(.showDialog(.confirmFork(cardId: cardId))) },
+            onForkCard: { cardId, _ in store.dispatch(.showDialog(.confirmFork(cardId: cardId))) },
             onCopyResumeCmd: { cardId in
                 guard let card = store.state.cards.first(where: { $0.id == cardId }) else { return }
                 var cmd = ""
@@ -360,6 +370,16 @@ struct ContentView: View {
                 }
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(cmd, forType: .string)
+            },
+            onDiscoverCard: { cardId in
+                Task {
+                    store.dispatch(.setBusy(cardId: cardId, busy: true))
+                    if let updatedLink = await orchestrator.discoverBranchesForCard(cardId: cardId) {
+                        store.dispatch(.createManualTask(updatedLink))
+                    }
+                    await store.reconcile()
+                    store.dispatch(.setBusy(cardId: cardId, busy: false))
+                }
             },
             onCleanupWorktree: { cardId in Task { await cleanupWorktree(cardId: cardId) } },
             canCleanupWorktree: { cardId in
@@ -1161,7 +1181,9 @@ struct ContentView: View {
                     }
 
                     ToolbarItem(placement: .primaryAction) {
-                        expandedActionsMenu
+                        if let card = store.state.selectedCard {
+                            expandedActionsMenu(for: card)
+                        }
                     }
                 }
 
@@ -1681,41 +1703,43 @@ struct ContentView: View {
 
     // MARK: - Expanded Actions Menu
 
-    /// Builds a SwiftUI Menu from CardDetailView's NSMenu builder, reusing icons and items.
-    private var expandedActionsMenu: some View {
+    private func expandedActionsMenu(for card: KanbanCodeCard) -> some View {
         Menu {
-            if let menu = actionsMenuProvider.builder?() {
-                ForEach(Array(menu.items.enumerated()), id: \.offset) { _, item in
-                    if item.isSeparatorItem {
-                        Divider()
-                    } else if let submenu = item.submenu {
-                        Menu(item.title) {
-                            ForEach(Array(submenu.items.enumerated()), id: \.offset) { _, sub in
-                                Button {
-                                    (sub.representedObject as? NSMenuActionItem)?.invoke()
-                                } label: {
-                                    if let img = sub.image {
-                                        Label { Text(sub.title) } icon: { Image(nsImage: img) }
-                                    } else {
-                                        Text(sub.title)
-                                    }
-                                }
-                            }
+            CardActionsMenu(
+                card: card,
+                showBranchInfo: true,
+                onStart: { startCard(cardId: card.id) },
+                onResume: { resumeCard(cardId: card.id) },
+                onFork: { keepWorktree in forkCard(cardId: card.id, keepWorktree: keepWorktree) },
+                onRename: { name in store.dispatch(.renameCard(cardId: card.id, name: name)) },
+                onCopyResumeCmd: {
+                    var cmd = ""
+                    if let pp = card.link.projectPath { cmd += "cd \(pp) && " }
+                    if let sid = card.link.sessionLink?.sessionId { cmd += "claude --resume \(sid)" }
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(cmd, forType: .string)
+                },
+                onDiscover: {
+                    Task {
+                        store.dispatch(.setBusy(cardId: card.id, busy: true))
+                        if let updatedLink = await orchestrator.discoverBranchesForCard(cardId: card.id) {
+                            store.dispatch(.createManualTask(updatedLink))
                         }
-                    } else {
-                        Button {
-                            (item.representedObject as? NSMenuActionItem)?.invoke()
-                        } label: {
-                            if let img = item.image {
-                                Label { Text(item.title) } icon: { Image(nsImage: img) }
-                            } else {
-                                Text(item.title)
-                            }
-                        }
-                        .disabled(!item.isEnabled)
+                        await store.reconcile()
+                        store.dispatch(.setBusy(cardId: card.id, busy: false))
                     }
+                },
+                onCleanupWorktree: { Task { await cleanupWorktree(cardId: card.id) } },
+                canCleanupWorktree: canCleanupWorktree(for: card),
+                onDelete: { store.dispatch(.showDialog(.confirmDelete(cardId: card.id))) },
+                availableProjects: projectList,
+                onMoveToProject: { path in store.dispatch(.moveCardToProject(cardId: card.id, projectPath: path)) },
+                onMoveToFolder: { selectFolderForMove(cardId: card.id) },
+                enabledAssistants: assistantRegistry.available,
+                onMigrateAssistant: { target in
+                    store.dispatch(.showDialog(.confirmMigration(cardId: card.id, targetAssistant: target)))
                 }
-            }
+            )
         } label: {
             Image(systemName: "ellipsis")
         }
