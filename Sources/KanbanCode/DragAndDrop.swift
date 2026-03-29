@@ -53,6 +53,7 @@ struct DroppableColumnView: View {
     var onColumnBackgroundClick: (KanbanCodeColumn) -> Void = { _ in }
 
     @State private var isTargeted = false
+    @State private var renamingCardId: String?
     @State private var cardFrames: [String: CGRect] = [:]
 
     private var isCurrentDropAllowed: Bool {
@@ -217,6 +218,18 @@ struct DroppableColumnView: View {
         .animation(.easeInOut(duration: 0.15), value: isTargeted)
         .animation(.easeInOut(duration: 0.15), value: dragState.mergeTargetId)
         .animation(.easeInOut(duration: 0.15), value: dragState.reorderTargetId)
+        .sheet(isPresented: Binding(
+            get: { renamingCardId != nil && cards.contains(where: { $0.id == renamingCardId }) },
+            set: { if !$0 { renamingCardId = nil } }
+        )) {
+            if let cardId = renamingCardId, let card = cards.first(where: { $0.id == cardId }) {
+                RenameSessionDialog(
+                    currentName: card.link.name ?? card.displayTitle,
+                    isPresented: Binding(get: { renamingCardId != nil }, set: { if !$0 { renamingCardId = nil } }),
+                    onRename: { name in onRenameCard(cardId, name) }
+                )
+            }
+        }
     }
 
     private func handleBackgroundTap(at location: CGPoint) {
@@ -242,7 +255,7 @@ struct DroppableColumnView: View {
             onStart: { onStartCard(card.id) },
             onResume: { onResumeCard(card.id) },
             onFork: { keepWorktree in onForkCard(card.id, keepWorktree) },
-            onRename: { newName in onRenameCard(card.id, newName) },
+            onRenameRequest: { renamingCardId = card.id },
             onCopyResumeCmd: { onCopyResumeCmd(card.id) },
             onDiscover: { onDiscoverCard(card.id) },
             onCleanupWorktree: { onCleanupWorktree(card.id) },

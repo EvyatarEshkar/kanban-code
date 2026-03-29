@@ -1457,9 +1457,7 @@ struct CardDetailView: View {
                 onStart: { onResume() },
                 onResume: { onResume() },
                 onFork: onFork,
-                onRename: { newName in
-                    onRename(newName.isEmpty ? "" : newName)
-                },
+                onRenameRequest: { showRenameSheet = true },
                 onCopyResumeCmd: { copyResumeCommand() },
                 onCheckpoint: {
                     checkpointMode = true

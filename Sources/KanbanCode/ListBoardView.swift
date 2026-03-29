@@ -202,6 +202,7 @@ private struct ListBoardSectionView: View {
     let canDropCard: (KanbanCodeCard, KanbanCodeColumn) -> Bool
     let onReorderCard: (String, String, Bool) -> Void
     let onRenameCard: (String, String) -> Void
+    @State private var renamingCardId: String?
     let onToggleCollapse: () -> Void
 
     @State private var isTargeted = false
@@ -310,7 +311,7 @@ private struct ListBoardSectionView: View {
                         onMoveToFolder: { onMoveToFolder(card.id) },
                         enabledAssistants: enabledAssistants,
                         onMigrateAssistant: { target in onMigrateAssistant(card.id, target) },
-                        onRename: { name in onRenameCard(card.id, name) }
+                        onRenameRequest: { renamingCardId = card.id }
                     )
                     .opacity(dragState.draggingCard?.id == card.id ? 0.65 : 1)
                     .background(
@@ -345,6 +346,18 @@ private struct ListBoardSectionView: View {
                 onMoveCard: onMoveCard,
                 onReorderCard: onReorderCard
             ))
+            .sheet(isPresented: Binding(
+                get: { renamingCardId != nil },
+                set: { if !$0 { renamingCardId = nil } }
+            )) {
+                if let cardId = renamingCardId, let card = section.cards.first(where: { $0.id == cardId }) {
+                    RenameSessionDialog(
+                        currentName: card.link.name ?? card.displayTitle,
+                        isPresented: Binding(get: { renamingCardId != nil }, set: { if !$0 { renamingCardId = nil } }),
+                        onRename: { name in onRenameCard(cardId, name) }
+                    )
+                }
+            }
         }
     }
 }
@@ -500,7 +513,7 @@ private struct ListCardRowView: View {
     var onMoveToFolder: () -> Void = {}
     var enabledAssistants: [CodingAssistant] = []
     var onMigrateAssistant: (CodingAssistant) -> Void = { _ in }
-    var onRename: (String) -> Void = { _ in } // newName
+    var onRenameRequest: () -> Void = {}
 
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
@@ -572,7 +585,7 @@ private struct ListCardRowView: View {
                 onStart: onStart,
                 onResume: onResume,
                 onFork: onFork,
-                onRename: onRename,
+                onRenameRequest: onRenameRequest,
                 onCopyResumeCmd: onCopyResumeCmd,
                 onDiscover: onDiscover,
                 onCleanupWorktree: onCleanupWorktree,

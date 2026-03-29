@@ -9,7 +9,7 @@ struct CardView: View {
     var onStart: () -> Void = {}
     var onResume: () -> Void = {}
     var onFork: (_ keepWorktree: Bool) -> Void = { _ in }
-    var onRename: (String) -> Void = { _ in }
+    var onRenameRequest: () -> Void = {}
     var onCopyResumeCmd: () -> Void = {}
     var onDiscover: () -> Void = {}
     var onCleanupWorktree: () -> Void = {}
@@ -99,7 +99,7 @@ struct CardView: View {
                 onStart: onStart,
                 onResume: onResume,
                 onFork: onFork,
-                onRename: onRename,
+                onRenameRequest: onRenameRequest,
                 onCopyResumeCmd: onCopyResumeCmd,
                 onDiscover: onDiscover,
                 onCleanupWorktree: onCleanupWorktree,

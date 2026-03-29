@@ -20,7 +20,7 @@ struct CardActionsMenu: View {
     var onStart: () -> Void = {}
     var onResume: () -> Void = {}
     var onFork: (_ keepWorktree: Bool) -> Void = { _ in }
-    var onRename: (String) -> Void = { _ in }
+    var onRenameRequest: () -> Void = {}
     var onCopyResumeCmd: () -> Void = {}
     var onCheckpoint: (() -> Void)?
     var onAddLink: (() -> Void)?
@@ -35,9 +35,6 @@ struct CardActionsMenu: View {
     var onMoveToFolder: () -> Void = {}
     var enabledAssistants: [CodingAssistant] = []
     var onMigrateAssistant: (CodingAssistant) -> Void = { _ in }
-
-    @State private var showRenameAlert = false
-    @State private var renameText = ""
 
     var body: some View {
         // Branch / PR / Issue info (expanded detail only)
@@ -158,15 +155,8 @@ struct CardActionsMenu: View {
         }
         .disabled(card.link.sessionLink?.sessionPath == nil)
 
-        Button { renameText = card.link.name ?? card.displayTitle; showRenameAlert = true } label: {
+        Button(action: onRenameRequest) {
             Label("Rename", systemImage: "pencil")
-        }
-        .alert("Rename", isPresented: $showRenameAlert) {
-            TextField("Name", text: $renameText)
-            Button("Cancel", role: .cancel) {}
-            Button("Rename") {
-                onRename(renameText.trimmingCharacters(in: .whitespacesAndNewlines))
-            }
         }
 
         if let onCheckpoint {

@@ -72,6 +72,7 @@ struct ContentView: View {
     @State var isDroppingFolder = false
     @State var isDroppingImage = false
     @State var addFromPathText = ""
+    @State var renamingCardId: String?
     @State var launchConfig: LaunchConfig?
     @State var syncStatuses: [String: SyncStatus] = [:]
     @State var isSyncRefreshing = false
@@ -739,6 +740,18 @@ struct ContentView: View {
                         orchestrator.updateNotifier(newNotifier)
                     }
                 )
+            }
+            .sheet(isPresented: Binding(
+                get: { renamingCardId != nil },
+                set: { if !$0 { renamingCardId = nil } }
+            )) {
+                if let cardId = renamingCardId, let card = store.state.cards.first(where: { $0.id == cardId }) {
+                    RenameSessionDialog(
+                        currentName: card.link.name ?? card.displayTitle,
+                        isPresented: Binding(get: { renamingCardId != nil }, set: { if !$0 { renamingCardId = nil } }),
+                        onRename: { name in store.dispatch(.renameCard(cardId: cardId, name: name)) }
+                    )
+                }
             }
             .sheet(isPresented: $showProcessManager) {
                 ProcessManagerView(
@@ -1711,7 +1724,7 @@ struct ContentView: View {
                 onStart: { startCard(cardId: card.id) },
                 onResume: { resumeCard(cardId: card.id) },
                 onFork: { keepWorktree in forkCard(cardId: card.id, keepWorktree: keepWorktree) },
-                onRename: { name in store.dispatch(.renameCard(cardId: card.id, name: name)) },
+                onRenameRequest: { renamingCardId = card.id },
                 onCopyResumeCmd: {
                     var cmd = ""
                     if let pp = card.link.projectPath { cmd += "cd \(pp) && " }
