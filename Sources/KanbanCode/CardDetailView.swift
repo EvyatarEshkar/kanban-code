@@ -1477,13 +1477,13 @@ struct CardDetailView: View {
             )
         } label: {
             Image(systemName: "ellipsis")
-                .font(.app(.caption))
+                .font(.system(size: 16))
                 .frame(width: CGFloat(36).scaled, height: CGFloat(36).scaled)
                 .contentShape(Circle())
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
-        .fixedSize()
+        .frame(width: CGFloat(36).scaled, height: CGFloat(36).scaled)
     }
 
     // MARK: - History loading

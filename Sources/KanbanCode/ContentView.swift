@@ -401,6 +401,9 @@ struct ContentView: View {
             },
             onRefreshBacklog: { Task { await store.refreshBacklog() } },
             onDropCard: { cardId, column in handleDrop(cardId: cardId, to: column) },
+            onMergeCards: { sourceId, targetId in
+                store.dispatch(.mergeCards(sourceId: sourceId, targetId: targetId))
+            },
             canDropCard: { card, column in
                 CardDropIntent.resolve(card, to: column).isAllowed
             },
