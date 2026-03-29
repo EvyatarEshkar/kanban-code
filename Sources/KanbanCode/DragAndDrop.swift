@@ -357,16 +357,26 @@ struct ColumnDropDelegate: DropDelegate {
     }
 
     private func updateReorderTarget(at location: CGPoint, source: KanbanCodeCard) {
-        dragState.mergeTargetId = nil
-
         // Find the nearest card and whether cursor is in upper or lower half
         for (cardId, frame) in cardFrames {
             guard cardId != source.id, frame.contains(location) else { continue }
+
+            // Check if this is a valid merge target — merge takes priority over reorder
+            if let targetCard = cards.first(where: { $0.id == cardId }),
+               Link.mergeBlocked(source: source.link, target: targetCard.link) == nil {
+                dragState.mergeTargetId = cardId
+                dragState.reorderTargetId = nil
+                return
+            }
+
+            // Otherwise reorder
             let midY = frame.midY
+            dragState.mergeTargetId = nil
             dragState.reorderTargetId = cardId
             dragState.reorderAbove = location.y < midY
             return
         }
+        dragState.mergeTargetId = nil
         dragState.reorderTargetId = nil
     }
 

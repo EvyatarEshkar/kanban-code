@@ -479,6 +479,27 @@ public enum CardReconciler {
             }
         }
 
+        // 3b. Match worktree sessions by project root extracted from directory name.
+        //     When the session file is just created (no cwd yet), metadata.projectPath is nil.
+        //     The directory name encodes the full path including worktree, so we extract the
+        //     project root from it and match against launching cards.
+        if let sessionPath = session.jsonlPath {
+            let dirName = URL(fileURLWithPath: sessionPath).deletingLastPathComponent().lastPathComponent
+            // Claude encodes ".claude/worktrees/name" as "--claude-worktrees-name" in directory names
+            if let worktreeRange = dirName.range(of: "--claude-worktrees-") {
+                let rootEncodedName = String(dirName[dirName.startIndex..<worktreeRange.lowerBound])
+                let projectRoot = JsonlParser.decodeDirectoryName(rootEncodedName)
+                for (_, link) in linksById {
+                    guard link.tmuxLink != nil,
+                          link.sessionLink == nil,
+                          link.projectPath == projectRoot
+                    else { continue }
+                    KanbanCodeLog.info("reconciler", "findCard: session=\(session.id.prefix(8)) matched by worktree dir name → card=\(link.id.prefix(12))")
+                    return link.id
+                }
+            }
+        }
+
         // 4. Match by project path for cards that already have a session + extra shell tabs.
         //    When the user runs `claude` in a card's shell tab, a new session is created
         //    in the same project. We match it to the existing card to prevent duplicates.

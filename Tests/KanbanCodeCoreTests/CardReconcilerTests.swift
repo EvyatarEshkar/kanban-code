@@ -1366,6 +1366,37 @@ struct CardReconcilerTests {
         #expect(result.count == 2, "Different project = different card")
     }
 
+    // MARK: - Worktree directory name matching (step 3b)
+
+    @Test("Worktree session matches manual card via directory name when cwd is nil")
+    func worktreeSessionMatchesByDirName() {
+        let manualCard = Link(
+            name: "My task",
+            projectPath: "/Users/rchaves/Projects/langwatch",
+            column: .inProgress,
+            source: .manual,
+            tmuxLink: TmuxLink(sessionName: "langwatch-card1")
+            // No sessionLink yet — still launching
+        )
+
+        let snapshot = CardReconciler.DiscoverySnapshot(
+            sessions: [
+                Session(
+                    id: "s-wt",
+                    // projectPath is nil — session file was just created, no cwd yet
+                    messageCount: 0,
+                    modifiedTime: .now,
+                    jsonlPath: "/Users/rchaves/.claude/projects/-Users-rchaves-Projects-langwatch--claude-worktrees-mighty-toasting-sundae/s-wt.jsonl"
+                ),
+            ]
+        )
+
+        let result = CardReconciler.reconcile(existing: [manualCard], snapshot: snapshot)
+        #expect(result.count == 1, "Worktree session should match manual card via directory name")
+        #expect(result[0].id == manualCard.id)
+        #expect(result[0].sessionLink?.sessionId == "s-wt")
+    }
+
     @Test("Duplicate sessionId merge is idempotent")
     func duplicateSessionIdIdempotent() {
         let manualCard = Link(
