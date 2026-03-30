@@ -1411,6 +1411,21 @@ struct CardDetailView: View {
         }
         .padding(16)
 
+        // Object field (if set)
+        if let object = card.link.object, !object.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Object")
+                    .font(.app(.caption))
+                    .foregroundStyle(.tertiary)
+                Text(object)
+                    .font(.app(.callout))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+        }
+
         Divider()
 
         // Tab bar

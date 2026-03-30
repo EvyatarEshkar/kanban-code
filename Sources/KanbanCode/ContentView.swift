@@ -58,6 +58,8 @@ struct ContentView: View {
     @AppStorage("showBoardInExpanded") var showBoardInExpanded = false
     @State var sidebarVisibility: NavigationSplitViewVisibility = .detailOnly
     @State var showNewTask = false
+    @State var showTrash = false
+    @State var editingCardId: String? = nil
     @State var showOnboarding = false
     @AppStorage("appearanceMode") var appearanceMode: AppearanceMode = .auto
     @AppStorage("boardViewMode") var boardViewModeRaw = BoardViewMode.kanban.rawValue
@@ -310,7 +312,9 @@ struct ContentView: View {
                 guard let card = store.state.cards.first(where: { $0.id == cardId }) else { return false }
                 return canCleanupWorktree(for: card)
             },
+            onEditCard: { cardId in editingCardId = cardId },
             onArchiveCard: { cardId in archiveCard(cardId: cardId) },
+            onTrashCard: { cardId in store.dispatch(.trashCard(cardId: cardId)) },
             onDeleteCard: { cardId in store.dispatch(.showDialog(.confirmDelete(cardId: cardId))) },
             availableProjects: projectList,
             onMoveToProject: { cardId, projectPath in
@@ -571,21 +575,34 @@ struct ContentView: View {
     }
 
     private var boardWithOverlays: some View {
-        Group {
-            if isExpandedDetail {
-                if let card = store.state.selectedCard {
-                    makeCardDetailView(card: card)
-                } else {
-                    expandedEmptyState
-                }
-            } else {
-                // Normal: kanban board with inspector
-                boardView
-                    .ignoresSafeArea(edges: .top)
-                    .inspector(isPresented: showInspector) {
-                        inspectorContent
-                            .inspectorColumnWidth(min: 600, ideal: 800, max: 1000)
+        VStack(spacing: 0) {
+            Group {
+                if isExpandedDetail {
+                    if let card = store.state.selectedCard {
+                        makeCardDetailView(card: card)
+                    } else {
+                        expandedEmptyState
                     }
+                } else {
+                    // Normal: kanban board with overlay detail panel (doesn't shift board columns)
+                    boardView
+                        .ignoresSafeArea(edges: .top)
+                        .overlay(alignment: .trailing) {
+                            if store.state.selectedCardId != nil {
+                                inspectorContent
+                                    .frame(width: 800)
+                                    .background(.regularMaterial)
+                                    .shadow(color: .black.opacity(0.18), radius: 20, x: -4)
+                                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                            }
+                        }
+                        .animation(.spring(duration: 0.28), value: store.state.selectedCardId)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            if !isExpandedDetail {
+                AllSessionsBar(store: store)
             }
         }
             .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
@@ -671,16 +688,57 @@ struct ContentView: View {
                     defaultProjectPath: store.state.selectedProjectPath,
                     globalRemoteSettings: store.state.globalRemoteSettings,
                     enabledAssistants: assistantRegistry.available,
-                    onCreate: { prompt, projectPath, title, startImmediately, images in
-                        createManualTask(prompt: prompt, projectPath: projectPath, title: title, startImmediately: startImmediately, images: images)
+                    existingCards: store.state.cards,
+                    onCreate: { prompt, object, projectPath, title, startImmediately, images in
+                        createManualTask(prompt: prompt, object: object, projectPath: projectPath, title: title, startImmediately: startImmediately, images: images)
                     },
-                    onCreateAndLaunch: { prompt, projectPath, title, createWorktree, runRemotely, skipPermissions, commandOverride, images, assistant in
-                        createManualTaskAndLaunch(prompt: prompt, projectPath: projectPath, title: title, createWorktree: createWorktree, runRemotely: runRemotely, skipPermissions: skipPermissions, commandOverride: commandOverride, images: images, assistant: assistant)
+                    onCreateAndLaunch: { prompt, object, projectPath, title, createWorktree, runRemotely, skipPermissions, commandOverride, images, assistant in
+                        createManualTaskAndLaunch(prompt: prompt, object: object, projectPath: projectPath, title: title, createWorktree: createWorktree, runRemotely: runRemotely, skipPermissions: skipPermissions, commandOverride: commandOverride, images: images, assistant: assistant)
+                    },
+                    onSendToExisting: { cardId, prompt in
+                        let queued = QueuedPrompt(body: prompt, sendAutomatically: true)
+                        store.dispatch(.addQueuedPrompt(cardId: cardId, prompt: queued))
+                        store.dispatch(.selectCard(cardId: cardId))
                     }
                 )
             }
             .sheet(isPresented: $showAddFromPath) {
                 addFromPathSheet
+            }
+            .sheet(isPresented: $showTrash) {
+                TrashView(store: store)
+            }
+            .sheet(isPresented: Binding(
+                get: { editingCardId != nil },
+                set: { if !$0 { editingCardId = nil } }
+            )) {
+                if let cardId = editingCardId,
+                   let card = store.state.cards.first(where: { $0.id == cardId }) ?? store.state.trashedCards.first(where: { $0.id == cardId }) {
+                    NewTaskDialog(
+                        isPresented: Binding(get: { editingCardId != nil }, set: { if !$0 { editingCardId = nil } }),
+                        projects: store.state.configuredProjects,
+                        defaultProjectPath: card.link.projectPath,
+                        globalRemoteSettings: store.state.globalRemoteSettings,
+                        enabledAssistants: assistantRegistry.available,
+                        existingCards: store.state.cards,
+                        editingName: card.link.name,
+                        editingObject: card.link.object,
+                        editingPrompt: card.link.promptBody,
+                        editingProjectPath: card.link.projectPath,
+                        onUpdate: { prompt, object, projectPath, title in
+                            let trimmedName = title?.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+                            let finalName = (trimmedName?.isEmpty == false) ? trimmedName : nil
+                            let trimmedPrompt = prompt.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+                            store.dispatch(.updateCardDetails(
+                                cardId: cardId,
+                                name: finalName ?? card.link.name,
+                                object: object,
+                                promptBody: trimmedPrompt.isEmpty ? nil : trimmedPrompt,
+                                projectPath: projectPath
+                            ))
+                        }
+                    )
+                }
             }
             .sheet(item: $launchConfig) { config in
                 LaunchConfirmationDialog(
@@ -1164,6 +1222,32 @@ struct ContentView: View {
                         expandedActionsMenu
                     }
                 }
+
+                ToolbarItem(placement: .primaryAction) {
+                    Button { showTrash = true } label: {
+                        Image(systemName: "trash")
+                    }
+                    .help("Trash (\(store.state.trashedCards.count) items)")
+                    .overlay(alignment: .topTrailing) {
+                        if !store.state.trashedCards.isEmpty {
+                            Circle()
+                                .fill(Color.red)
+                                .frame(width: 8, height: 8)
+                                .offset(x: 3, y: -3)
+                        }
+                    }
+                }
+
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                    } label: {
+                        Image(systemName: "gear")
+                    }
+                    .help("Settings (⌘,)")
+                }
+
+                ToolbarSpacer(.fixed, placement: .primaryAction)
 
                 ToolbarItem(placement: .primaryAction) {
                     Button { if showSearch { closePalette() } else { openPalette() } } label: {
@@ -2010,7 +2094,7 @@ struct ContentView: View {
         presentNewTask()
     }
 
-    private func createManualTask(prompt: String, projectPath: String?, title: String? = nil, startImmediately: Bool = false, images: [ImageAttachment] = []) {
+    private func createManualTask(prompt: String, object: String? = nil, projectPath: String?, title: String? = nil, startImmediately: Bool = false, images: [ImageAttachment] = []) {
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let name: String
         if let title, !title.isEmpty {
@@ -2029,6 +2113,7 @@ struct ContentView: View {
             column: startImmediately ? .inProgress : .backlog,
             source: .manual,
             promptBody: trimmed,
+            object: object,
             promptImagePaths: imagePaths
         )
 
@@ -2040,7 +2125,7 @@ struct ContentView: View {
         }
     }
 
-    private func createManualTaskAndLaunch(prompt: String, projectPath: String?, title: String? = nil, createWorktree: Bool, runRemotely: Bool, skipPermissions: Bool = true, commandOverride: String? = nil, images: [ImageAttachment] = [], assistant: CodingAssistant = .claude) {
+    private func createManualTaskAndLaunch(prompt: String, object: String? = nil, projectPath: String?, title: String? = nil, createWorktree: Bool, runRemotely: Bool, skipPermissions: Bool = true, commandOverride: String? = nil, images: [ImageAttachment] = [], assistant: CodingAssistant = .claude) {
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let name: String
         if let title, !title.isEmpty {
@@ -2059,6 +2144,7 @@ struct ContentView: View {
             column: .inProgress,
             source: .manual,
             promptBody: trimmed,
+            object: object,
             promptImagePaths: imagePaths,
             assistant: assistant
         )

@@ -34,7 +34,9 @@ struct DroppableColumnView: View {
     var onMergeCards: (String, String) -> Void = { _, _ in }   // (sourceId, targetId)
     var onReorderCard: (String, String, Bool) -> Void = { _, _, _ in }  // (cardId, targetCardId, above)
     var onRenameCard: (String, String) -> Void = { _, _ in }
+    var onEditCard: (String) -> Void = { _ in }
     var onArchiveCard: (String) -> Void = { _ in }
+    var onTrashCard: (String) -> Void = { _ in }
     var onStartCard: (String) -> Void = { _ in }
     var onResumeCard: (String) -> Void = { _ in }
     var onForkCard: (String) -> Void = { _ in }
@@ -95,7 +97,9 @@ struct DroppableColumnView: View {
                         onCopyResumeCmd: { onCopyResumeCmd(card.id) },
                         onCleanupWorktree: { onCleanupWorktree(card.id) },
                         canCleanupWorktree: canCleanupWorktree(card.id),
+                        onEdit: { onEditCard(card.id) },
                         onArchive: { onArchiveCard(card.id) },
+                        onTrash: { onTrashCard(card.id) },
                         onDelete: { onDeleteCard(card.id) },
                         availableProjects: availableProjects,
                         onMoveToProject: { projectPath in onMoveToProject(card.id, projectPath) },
@@ -181,7 +185,7 @@ struct DroppableColumnView: View {
         }
         .coordinateSpace(name: "column_\(column.rawValue)")
         .onPreferenceChange(CardFramePreference.self) { cardFrames = $0 }
-        .frame(minWidth: 240, idealWidth: 280, maxWidth: 360)
+        .frame(minWidth: 220, maxWidth: .infinity)
         .glassColumn()
         .overlay(
             RoundedRectangle(cornerRadius: 12)

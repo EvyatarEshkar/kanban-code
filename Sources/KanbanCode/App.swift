@@ -89,21 +89,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             NSApp.applicationIconImage = icon
         }
 
-        // Set up notifications: delegate must be set BEFORE requesting authorization
-        let center = UNUserNotificationCenter.current()
-        center.delegate = self
-        center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
-            if let error {
-                print("[Kanban Code] Notification permission error: \(error)")
-            } else if !granted {
-                print("[Kanban Code] Notification permission denied")
+        // Set up notifications (requires bundle identifier — skipped when run without Info.plist)
+        if Bundle.main.bundleIdentifier != nil {
+            let center = UNUserNotificationCenter.current()
+            center.delegate = self
+            Task {
+                do {
+                    let granted = try await center.requestAuthorization(options: [.alert, .sound, .badge])
+                    if !granted {
+                        print("[Kanban Code] Notification permission denied")
+                    }
+                } catch {
+                    print("[Kanban Code] Notification permission error: \(error)")
+                }
             }
         }
     }
 
-    /// Prevent Cmd+W from closing the single window — close terminal tab instead.
+    /// Red X quits the app; Cmd+W closes the current terminal tab.
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        NotificationCenter.default.post(name: .kanbanCloseTerminalTab, object: nil)
+        if let event = NSApp.currentEvent, event.type == .keyDown {
+            // Keyboard shortcut (Cmd+W) — close terminal tab only
+            NotificationCenter.default.post(name: .kanbanCloseTerminalTab, object: nil)
+        } else {
+            // Red X button click — trigger the normal quit flow (checks for active sessions)
+            NSApp.terminate(nil)
+        }
         return false
     }
 

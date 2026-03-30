@@ -6,7 +6,7 @@ import {
 import { arrayMove } from "@dnd-kit/sortable";
 import { useState } from "react";
 import { useBoardStore } from "../store/boardStore";
-import { COLUMNS, type CardDto, type KanbanColumn } from "../types";
+import { BOARD_COLUMNS, COLUMNS, type CardDto, type KanbanColumn } from "../types";
 import { useTheme, t } from "../theme";
 import CardView from "./CardView";
 import ColumnView from "./ColumnView";
@@ -88,7 +88,7 @@ export default function BoardView() {
         onDragEnd={handleDragEnd}
       >
         <div className="flex flex-1 gap-1.5 overflow-x-auto p-2">
-          {COLUMNS.map((column) => <ColumnView key={column} column={column} />)}
+          {BOARD_COLUMNS.map((column) => <ColumnView key={column} column={column} />)}
         </div>
         <DragOverlay dropAnimation={dropAnimation}>
           {draggingCard && (

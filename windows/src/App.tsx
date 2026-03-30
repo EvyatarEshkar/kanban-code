@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import AllSessionsBar from "./components/AllSessionsBar";
 import BoardView from "./components/BoardView";
 import CardDetailView from "./components/CardDetailView";
 import NewTaskDialog from "./components/NewTaskDialog";
@@ -180,15 +181,18 @@ export default function App() {
       </header>
 
       {/* Main content */}
-      <div className="flex flex-1 overflow-hidden">
-        {settingsOpen ? (
-          <SettingsView />
-        ) : (
-          <>
-            <BoardView />
-            {selectedCardId && <CardDetailView />}
-          </>
-        )}
+      <div className="flex flex-col flex-1 overflow-hidden">
+        <div className="relative flex flex-col flex-1 overflow-hidden">
+          {settingsOpen ? (
+            <SettingsView />
+          ) : (
+            <>
+              <BoardView />
+              {selectedCardId && <CardDetailView />}
+            </>
+          )}
+        </div>
+        {!settingsOpen && <AllSessionsBar />}
       </div>
 
       {/* Overlays */}

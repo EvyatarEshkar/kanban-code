@@ -80,6 +80,9 @@ public final class AppState: @unchecked Sendable {
     /// Cached cards array — rebuilt by BoardStore after each dispatch.
     public internal(set) var cards: [KanbanCodeCard] = []
 
+    /// Cards that have been moved to the trash.
+    public internal(set) var trashedCards: [KanbanCodeCard] = []
+
     /// The currently selected card — independently tracked so CardDetailView
     /// only re-renders when the selected card's data actually changes.
     public internal(set) var selectedCard: KanbanCodeCard?
@@ -97,12 +100,15 @@ public final class AppState: @unchecked Sendable {
     /// Rebuild all cached card arrays from current state.
     /// Only assigns when the result differs — prevents unnecessary SwiftUI re-renders.
     func rebuildCards() {
-        let newCards = links.values.map { link in
+        let allCards = links.values.map { link in
             let session = link.sessionLink.flatMap { sessions[$0.sessionId] }
             let activity = link.sessionLink.flatMap { activityMap[$0.sessionId] }
             let rateLimited = link.projectPath.map { rateLimitedRepos.contains($0) } ?? false
             return KanbanCodeCard(link: link, session: session, activityState: activity, isBusy: busyCards.contains(link.id), isRateLimited: rateLimited)
         }
+        let newTrashed = allCards.filter { $0.link.isTrashed == true }
+        let newCards = allCards.filter { $0.link.isTrashed != true }
+        if newTrashed != trashedCards { trashedCards = newTrashed }
         if newCards != cards { cards = newCards }
 
         let newSelected = selectedCardId.flatMap { id in cards.first { $0.id == id } }
@@ -131,9 +137,8 @@ public final class AppState: @unchecked Sendable {
         if newByColumn != cardsByColumn { cardsByColumn = newByColumn }
 
         let alwaysVisible: [KanbanCodeColumn] = [.backlog, .inProgress, .waiting, .inReview, .done]
-        var newVisible = alwaysVisible
-        if (newByColumn[.allSessions]?.count ?? 0) > 0 { newVisible.append(.allSessions) }
-        if newVisible != visibleColumns { visibleColumns = newVisible }
+        // allSessions lives in the bottom bar, never in visibleColumns
+        if alwaysVisible != visibleColumns { visibleColumns = alwaysVisible }
     }
 
     /// Cards for a specific column (pre-computed, cached).
@@ -209,7 +214,10 @@ public enum Action: Sendable {
     case moveCard(cardId: String, to: KanbanCodeColumn)
     case renameCard(cardId: String, name: String)
     case archiveCard(cardId: String)
+    case trashCard(cardId: String)
+    case restoreFromTrash(cardId: String)
     case deleteCard(cardId: String)
+    case updateCardDetails(cardId: String, name: String?, object: String?, promptBody: String?, projectPath: String?)
     case selectCard(cardId: String?)
     case setPaletteOpen(Bool)
     case setDetailExpanded(Bool)
@@ -503,6 +511,41 @@ public enum Reducer {
             state.links[cardId] = link
             effects.insert(.upsertLink(link), at: 0)
             return effects
+
+        case .trashCard(let cardId):
+            guard var link = state.links[cardId] else { return [] }
+            link.isTrashed = true
+            link.manuallyArchived = true
+            link.updatedAt = .now
+            if state.selectedCardId == cardId { state.selectedCardId = nil }
+            var effects: [Effect] = []
+            if let tmux = link.tmuxLink {
+                effects.append(.killTmuxSessions(tmux.allSessionNames))
+                effects.append(.cleanupTerminalCache(sessionNames: tmux.allSessionNames))
+                link.tmuxLink = nil
+            }
+            state.links[cardId] = link
+            effects.insert(.upsertLink(link), at: 0)
+            return effects
+
+        case .restoreFromTrash(let cardId):
+            guard var link = state.links[cardId] else { return [] }
+            link.isTrashed = nil
+            link.manuallyArchived = false
+            link.column = .backlog
+            link.updatedAt = .now
+            state.links[cardId] = link
+            return [.upsertLink(link)]
+
+        case .updateCardDetails(let cardId, let name, let object, let promptBody, let projectPath):
+            guard var link = state.links[cardId] else { return [] }
+            if let name { link.name = name.isEmpty ? nil : name }
+            link.object = object
+            if let promptBody { link.promptBody = promptBody.isEmpty ? nil : promptBody }
+            if let projectPath, !projectPath.isEmpty { link.projectPath = projectPath }
+            link.updatedAt = .now
+            state.links[cardId] = link
+            return [.upsertLink(link)]
 
         case .deleteCard(let cardId):
             guard let link = state.links.removeValue(forKey: cardId) else { return [] }

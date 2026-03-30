@@ -126,6 +126,9 @@ struct SettingsView: View {
 
             AmphetamineSettingsView()
                 .tabItem { Label("Amphetamine", systemImage: "bolt.fill") }
+
+            GenerationSettingsView()
+                .tabItem { Label("Generation", systemImage: "sparkles") }
         }
         .frame(width: 520, height: 460)
         .task {

@@ -26,6 +26,15 @@ export const COLUMNS: KanbanColumn[] = [
   "all_sessions",
 ];
 
+// Columns shown on the main board (excludes all_sessions, which lives in the bottom bar)
+export const BOARD_COLUMNS: KanbanColumn[] = [
+  "backlog",
+  "in_progress",
+  "requires_attention",
+  "in_review",
+  "done",
+];
+
 export interface SessionLink {
   sessionId: string;
   sessionPath?: string;

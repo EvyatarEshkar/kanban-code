@@ -13,7 +13,9 @@ struct CardView: View {
     var onCopyResumeCmd: () -> Void = {}
     var onCleanupWorktree: () -> Void = {}
     var canCleanupWorktree: Bool = true
+    var onEdit: () -> Void = {}
     var onArchive: () -> Void = {}
+    var onTrash: () -> Void = {}
     var onDelete: () -> Void = {}
     var availableProjects: [(name: String, path: String)] = []
     var onMoveToProject: (String) -> Void = { _ in }
@@ -21,31 +23,73 @@ struct CardView: View {
     var enabledAssistants: [CodingAssistant] = []
     var onMigrateAssistant: (CodingAssistant) -> Void = { _ in }
 
+    @State private var showPrompt = false
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            // Title
+        VStack(alignment: .leading, spacing: 5) {
+            // Title row (leave room for play button overlay)
             Text(card.displayTitle)
                 .font(.app(.body, weight: .medium))
                 .lineLimit(2)
                 .foregroundStyle(.primary)
+                .padding(.trailing, card.column == .backlog ? 36 : 0)
 
-            // Project + branch + link icons
+            // Object
+            if let object = card.link.object, !object.isEmpty {
+                Text(object)
+                    .font(.app(.callout))
+                    .lineLimit(2)
+                    .foregroundStyle(.secondary)
+            }
+
+            // Prompt toggle
+            if let promptBody = card.link.promptBody, !promptBody.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.15)) { showPrompt.toggle() }
+                    } label: {
+                        HStack(spacing: 3) {
+                            Text("Prompt")
+                                .font(.app(.caption2))
+                            Image(systemName: showPrompt ? "chevron.up" : "chevron.down")
+                                .font(.app(size: 8))
+                        }
+                        .foregroundStyle(.tertiary)
+                    }
+                    .buttonStyle(.plain)
+
+                    if showPrompt {
+                        Text(promptBody)
+                            .font(.app(.caption))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(5)
+                    }
+                }
+            }
+
+            // Bottom row: folder (left) | time + badge + indicators (right)
             HStack(spacing: 4) {
                 if let projectName = card.projectName {
                     Label(projectName, systemImage: "folder")
                         .font(.app(.caption))
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
                 if let branch = card.link.worktreeLink?.branch {
                     Label(branch, systemImage: "arrow.triangle.branch")
                         .font(.app(.caption))
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
-            }
-            .lineLimit(1)
 
-            // Bottom row: badge + time + link indicators
-            HStack(spacing: 6) {
+                Spacer()
+
+                CardBadgesRow(card: card)
+
+                Text(card.relativeTime)
+                    .font(.app(.caption2))
+                    .foregroundStyle(.tertiary)
+
                 if card.link.cardLabel == .session {
                     AssistantIcon(assistant: card.link.effectiveAssistant)
                         .frame(width: CGFloat(14).scaled, height: CGFloat(14).scaled)
@@ -53,14 +97,6 @@ struct CardView: View {
                 } else {
                     CardLabelBadge(label: card.link.cardLabel)
                 }
-
-                Text(card.relativeTime)
-                    .font(.app(.caption2))
-                    .foregroundStyle(.tertiary)
-
-                Spacer()
-
-                CardBadgesRow(card: card)
             }
         }
         .padding(10)
@@ -179,6 +215,9 @@ struct CardView: View {
                 }
             }
             Divider()
+            Button(action: onEdit) {
+                Label("Edit", systemImage: "pencil")
+            }
             if card.link.manuallyArchived {
                 // Already archived — offer delete (but not for pure issues that would reappear)
                 if card.link.source != .githubIssue {
@@ -189,6 +228,11 @@ struct CardView: View {
             } else {
                 Button(action: onArchive) {
                     Label("Archive", systemImage: "archivebox")
+                }
+                if card.link.source != .githubIssue {
+                    Button(role: .destructive, action: onTrash) {
+                        Label("Remove", systemImage: "minus.circle")
+                    }
                 }
             }
         }
@@ -439,3 +483,4 @@ struct CardBadgesRow: View {
         }
     }
 }
+

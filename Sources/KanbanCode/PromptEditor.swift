@@ -10,6 +10,8 @@ struct PromptEditor: NSViewRepresentable {
     var maxHeight: CGFloat = 400
     /// Identity tag — when this changes, the text view is force-updated regardless of focus.
     var identity: String = ""
+    /// When false, Enter inserts a newline instead of submitting.
+    var submitOnReturn: Bool = true
     var onSubmit: () -> Void = {}
     var onCmdSubmit: (() -> Void)?
     var onUpArrowAtStart: (() -> String?)?
@@ -43,6 +45,7 @@ struct PromptEditor: NSViewRepresentable {
         textView.textContainerInset = NSSize(width: 4, height: 4)
         textView.textContainer?.widthTracksTextView = true
         textView.delegate = context.coordinator
+        textView.submitOnReturn = submitOnReturn
         textView.onSubmit = onSubmit
         textView.onCmdSubmit = onCmdSubmit
         textView.onUpArrowAtStart = onUpArrowAtStart
@@ -72,6 +75,7 @@ struct PromptEditor: NSViewRepresentable {
             textView.string = text
             textView.needsDisplay = true // redraw placeholder if cleared
         }
+        textView.submitOnReturn = submitOnReturn
         textView.onSubmit = onSubmit
         textView.onCmdSubmit = onCmdSubmit
         textView.onUpArrowAtStart = onUpArrowAtStart
@@ -156,6 +160,7 @@ final class PromptEditorScrollView: NSScrollView {
 
 /// NSTextView subclass that intercepts Return key for submit behavior.
 final class SubmitTextView: NSTextView {
+    var submitOnReturn: Bool = true
     var onSubmit: () -> Void = {}
     var onCmdSubmit: (() -> Void)?
     var onUpArrowAtStart: (() -> String?)?
@@ -201,17 +206,30 @@ final class SubmitTextView: NSTextView {
         }
 
         if isReturn && !hasShift {
-            // Enter → send
-            if let delegate = self.delegate as? PromptEditor.Coordinator {
-                delegate.parent.text = self.string
+            if submitOnReturn {
+                // Enter → submit
+                if let delegate = self.delegate as? PromptEditor.Coordinator {
+                    delegate.parent.text = self.string
+                }
+                onSubmit()
+            } else {
+                // Enter → newline
+                insertNewline(nil)
             }
-            onSubmit()
             return
         }
 
         if isReturn && hasShift {
-            // Shift+Enter → insert newline
-            insertNewline(nil)
+            if submitOnReturn {
+                // Shift+Enter → insert newline
+                insertNewline(nil)
+            } else {
+                // Shift+Enter → submit
+                if let delegate = self.delegate as? PromptEditor.Coordinator {
+                    delegate.parent.text = self.string
+                }
+                onSubmit()
+            }
             return
         }
 

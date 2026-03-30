@@ -8,6 +8,7 @@ struct PromptSection: View {
     var placeholder: String = "Describe what you want Claude to do..."
     var minHeight: CGFloat = 80
     var maxHeight: CGFloat = 400
+    var submitOnReturn: Bool = true
     var onSubmit: () -> Void = {}
 
     var body: some View {
@@ -22,6 +23,7 @@ struct PromptSection: View {
                 text: $text,
                 placeholder: placeholder,
                 maxHeight: maxHeight,
+                submitOnReturn: submitOnReturn,
                 onSubmit: onSubmit,
                 onImagePaste: { data in
                     images.append(ImageAttachment(data: data))

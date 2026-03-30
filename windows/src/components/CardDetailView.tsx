@@ -246,11 +246,16 @@ export default function CardDetailView() {
 
   return (
     <div
-      className="flex flex-col h-full overflow-hidden relative animate-slide-in"
+      className="flex flex-col overflow-hidden relative animate-slide-in"
       style={{
+        position: "absolute",
+        right: 0,
+        top: 0,
+        bottom: 0,
         width: drawerWidth,
         minWidth: 340,
         maxWidth: 960,
+        zIndex: 10,
         background: c.bgDetail,
         borderLeft: `1px solid ${c.border}`,
       }}

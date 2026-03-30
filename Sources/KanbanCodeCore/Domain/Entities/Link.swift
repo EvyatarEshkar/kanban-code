@@ -164,6 +164,8 @@ public struct Link: Identifiable, Codable, Sendable, Equatable {
     public var manuallyArchived: Bool
     public var source: LinkSource
     public var promptBody: String?
+    public var object: String?
+    public var isTrashed: Bool?
     public var promptImagePaths: [String]?
 
     // Typed links — each independently optional
@@ -293,6 +295,7 @@ public struct Link: Identifiable, Codable, Sendable, Equatable {
         manuallyArchived: Bool = false,
         source: LinkSource = .discovered,
         promptBody: String? = nil,
+        object: String? = nil,
         promptImagePaths: [String]? = nil,
         sessionLink: SessionLink? = nil,
         tmuxLink: TmuxLink? = nil,
@@ -320,6 +323,7 @@ public struct Link: Identifiable, Codable, Sendable, Equatable {
         self.manuallyArchived = manuallyArchived
         self.source = source
         self.promptBody = promptBody
+        self.object = object
         self.promptImagePaths = promptImagePaths
         self.sessionLink = sessionLink
         self.tmuxLink = tmuxLink
@@ -341,7 +345,7 @@ public struct Link: Identifiable, Codable, Sendable, Equatable {
     private enum CodingKeys: String, CodingKey {
         // Card-level
         case id, name, projectPath, column, createdAt, updatedAt, lastActivity, lastOpenedAt
-        case manualOverrides, manuallyArchived, source, promptBody, promptImagePaths, isRemote, isLaunching, sortOrder
+        case manualOverrides, manuallyArchived, source, promptBody, object, isTrashed, promptImagePaths, isRemote, isLaunching, sortOrder
         case discoveredBranches, discoveredRepos, assistant
         // Typed links (new nested format)
         case sessionLink, tmuxLink, worktreeLink, prLinks, issueLink, queuedPrompts, browserTabs
@@ -366,6 +370,8 @@ public struct Link: Identifiable, Codable, Sendable, Equatable {
         manuallyArchived = try c.decodeIfPresent(Bool.self, forKey: .manuallyArchived) ?? false
         source = try c.decodeIfPresent(LinkSource.self, forKey: .source) ?? .discovered
         promptBody = try c.decodeIfPresent(String.self, forKey: .promptBody)
+        object = try c.decodeIfPresent(String.self, forKey: .object)
+        isTrashed = try c.decodeIfPresent(Bool.self, forKey: .isTrashed)
         promptImagePaths = try c.decodeIfPresent([String].self, forKey: .promptImagePaths)
         isRemote = try c.decodeIfPresent(Bool.self, forKey: .isRemote) ?? false
         isLaunching = try c.decodeIfPresent(Bool.self, forKey: .isLaunching)
@@ -452,6 +458,8 @@ public struct Link: Identifiable, Codable, Sendable, Equatable {
         try c.encode(manuallyArchived, forKey: .manuallyArchived)
         try c.encode(source, forKey: .source)
         try c.encodeIfPresent(promptBody, forKey: .promptBody)
+        try c.encodeIfPresent(object, forKey: .object)
+        try c.encodeIfPresent(isTrashed, forKey: .isTrashed)
         try c.encodeIfPresent(promptImagePaths, forKey: .promptImagePaths)
         try c.encode(isRemote, forKey: .isRemote)
         try c.encodeIfPresent(isLaunching, forKey: .isLaunching)
