@@ -295,7 +295,7 @@ private struct ListBoardSectionView: View {
                 onReorderCard: onReorderCard
             ))
         } else {
-            VStack(spacing: 4) {
+            LazyVStack(spacing: 4) {
                 ForEach(section.cards) { card in
                     if dragState.reorderTargetId == card.id && dragState.reorderAbove {
                         ReorderIndicator()
