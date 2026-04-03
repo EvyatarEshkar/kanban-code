@@ -1462,7 +1462,8 @@ public final class BoardStore: @unchecked Sendable {
         isReconciling = true
         defer { isReconciling = false }
 
-        dispatch(.setLoading(true))
+        // Only show loading indicator on first reconcile, not periodic refreshes
+        if state.links.isEmpty { dispatch(.setLoading(true)) }
         let reconcileStart = ContinuousClock.now
 
         do {

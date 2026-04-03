@@ -169,7 +169,7 @@ struct ListBoardView: View {
                     .foregroundStyle(.tertiary)
 
                 Button(action: onNewTask) {
-                    Label("New Task", systemImage: "plus")
+                    Label("New Task  \(AppShortcut.newTask.displayString)", systemImage: "plus")
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)

@@ -89,6 +89,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             NSApp.applicationIconImage = icon
         }
 
+        // Install `kanban` CLI to ~/.local/bin
+        Self.installCLI()
+
         // Set up notifications: delegate must be set BEFORE requesting authorization
         let center = UNUserNotificationCenter.current()
         center.delegate = self
@@ -99,6 +102,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
                 print("[Kanban Code] Notification permission denied")
             }
         }
+    }
+
+    /// Install a `kanban` shell script to ~/.local/bin so users can run
+    /// `kanban`, `kanban .`, or `kanban /path/to/project` from any terminal.
+    private static func installCLI() {
+        let binDir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".local/bin")
+        let scriptPath = binDir.appendingPathComponent("kanban")
+        // The CLI writes the path to a file, then activates the app.
+        // The app picks up the file in applicationDidBecomeActive.
+        // This avoids URL scheme issues that create duplicate windows.
+        let script = """
+        #!/bin/sh
+        # Installed by Kanban Code — opens the app and selects a project.
+        # Usage: kanban [path]   (defaults to current directory)
+        if [ -n "$1" ]; then
+            resolved="$(cd "$1" 2>/dev/null && pwd -P || echo "$1")"
+            mkdir -p ~/.kanban-code
+            echo "$resolved" > ~/.kanban-code/open-project
+        fi
+        open -a "KanbanCode"
+        """
+        do {
+            try FileManager.default.createDirectory(at: binDir, withIntermediateDirectories: true)
+            try script.write(to: scriptPath, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o755], ofItemAtPath: scriptPath.path
+            )
+        } catch {
+            print("[Kanban Code] Failed to install CLI: \(error)")
+        }
+    }
+
+    /// Check for a pending project open request from the CLI.
+    func applicationDidBecomeActive(_ notification: Notification) {
+        let file = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".kanban-code/open-project")
+        guard let path = try? String(contentsOf: file, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !path.isEmpty else { return }
+        try? FileManager.default.removeItem(at: file)
+        NotificationCenter.default.post(
+            name: .kanbanCodeOpenProject, object: nil,
+            userInfo: ["path": path]
+        )
     }
 
     /// Prevent Cmd+W from closing the single window — close terminal tab instead.
@@ -150,7 +198,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         process.waitUntilExit()
     }
 
-    // Handle kanbancode:// deep links (from Pushover tap, browser, etc.)
+    // Handle kanbancode:// deep links (from Pushover tap, browser, CLI, etc.)
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
             guard url.scheme == "kanbancode" else { continue }
@@ -160,6 +208,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
                 NotificationCenter.default.post(
                     name: .kanbanCodeSelectCard, object: nil,
                     userInfo: ["cardId": cardId]
+                )
+            }
+            // kanbancode://open?path=/some/project
+            if url.host == "open",
+               let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+               let path = components.queryItems?.first(where: { $0.name == "path" })?.value,
+               !path.isEmpty {
+                NotificationCenter.default.post(
+                    name: .kanbanCodeOpenProject, object: nil,
+                    userInfo: ["path": path]
                 )
             }
         }
@@ -236,4 +294,5 @@ extension Notification.Name {
     static let kanbanCloseTerminalTab = Notification.Name("kanbanCloseTerminalTab")
     static let chatCardExpanded = Notification.Name("chatCardExpanded")
     static let kanbanCodeAddLink = Notification.Name("kanbanCodeAddLink")
+    static let kanbanCodeOpenProject = Notification.Name("kanbanCodeOpenProject")
 }

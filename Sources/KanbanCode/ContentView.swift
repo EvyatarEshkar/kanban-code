@@ -1033,6 +1033,11 @@ struct ContentView: View {
                     store.dispatch(.selectCard(cardId: cardId))
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: .kanbanCodeOpenProject)) { notification in
+                if let path = notification.userInfo?["path"] as? String {
+                    openOrCreateProject(path: path)
+                }
+            }
             .onReceive(NotificationCenter.default.publisher(for: .kanbanCodeAddLink)) { notification in
                 if let cardId = notification.userInfo?["cardId"] as? String {
                     showAddLinkCardId = cardId
@@ -1575,10 +1580,10 @@ struct ContentView: View {
 
     private var paletteCommands: [CommandItem] {
         var cmds: [CommandItem] = [
-            CommandItem("Open Settings", icon: "gear", shortcut: "⌘,") {
+            CommandItem("Open Settings", icon: "gear", shortcut: AppShortcut.openSettings.displayString) {
                 NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
             },
-            CommandItem("Toggle View Mode", icon: isExpandedDetail ? "square.split.2x1" : "list.bullet", shortcut: "⌘↩") { [self] in
+            CommandItem("Toggle View Mode", icon: isExpandedDetail ? "square.split.2x1" : "list.bullet", shortcut: AppShortcut.toggleExpanded.displayString) { [self] in
                 if isExpandedDetail {
                     isExpandedDetail = false
                     boardViewModeRaw = BoardViewMode.kanban.rawValue
@@ -1588,7 +1593,7 @@ struct ContentView: View {
                     boardViewModeRaw = BoardViewMode.list.rawValue
                 }
             },
-            CommandItem("New Task", icon: "plus", shortcut: "⌘N") { [self] in
+            CommandItem("New Task", icon: "plus", shortcut: AppShortcut.newTask.displayString) { [self] in
                 presentNewTask()
             },
         ]
@@ -1596,11 +1601,12 @@ struct ContentView: View {
         // Project switching
         let visibleProjects = store.state.configuredProjects.filter(\.visible)
         if !visibleProjects.isEmpty {
-            cmds.append(CommandItem("Show All Projects", icon: "folder", shortcut: "⌘1") { [self] in
+            cmds.append(CommandItem("Show All Projects", icon: "folder", shortcut: AppShortcut.project1.displayString) { [self] in
                 setSelectedProject(nil)
             })
             for (i, project) in visibleProjects.enumerated() {
-                let shortcut = i < 8 ? "⌘\(i + 2)" : nil
+                let projectShortcuts: [AppShortcut] = [.project2, .project3, .project4, .project5, .project6, .project7, .project8, .project9]
+                let shortcut = i < projectShortcuts.count ? projectShortcuts[i].displayString : nil
                 let path = project.path
                 cmds.append(CommandItem("Switch to \(project.name)", icon: "folder", shortcut: shortcut) { [self] in
                     setSelectedProject(path)
@@ -2030,6 +2036,24 @@ struct ContentView: View {
             await store.loadSettingsAndCache()
             await store.reconcile()
             setSelectedProject(path)
+        }
+    }
+
+    /// Open a project by path — select it if it exists, otherwise create and select it.
+    /// Called from the `kanban` CLI via file-based IPC.
+    private func openOrCreateProject(path: String) {
+        // Check if project already exists (match by path or repoRoot)
+        if store.state.configuredProjects.contains(where: { $0.path == path || $0.repoRoot == path }) {
+            setSelectedProject(path)
+            return
+        }
+        // Project doesn't exist — create it, select first to avoid empty flash
+        let project = Project(path: path)
+        setSelectedProject(path)
+        Task {
+            try? await settingsStore.addProject(project)
+            await store.loadSettingsAndCache()
+            await store.reconcile()
         }
     }
 
