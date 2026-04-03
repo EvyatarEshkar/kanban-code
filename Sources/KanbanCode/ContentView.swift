@@ -50,6 +50,7 @@ struct LaunchConfig: Identifiable {
 
 struct ContentView: View {
     // Properties are internal (not private) to allow extensions in separate files
+    @Environment(\.openSettings) private var openSettings
     @State var store: BoardStore
     @State var orchestrator: BackgroundOrchestrator
     @State var searchInitialQuery = ""
@@ -412,19 +413,12 @@ struct ContentView: View {
                         }
                         .help("New task (⌘N)")
 
-                        Button { Task { await store.reconcile() } } label: {
+                        Button { Task { await store.reconcile(showLoadingIndicator: true) } } label: {
                             Image(systemName: "arrow.clockwise")
                         }
                         .disabled(store.state.isLoading)
                         .help("Refresh sessions")
 
-                        Button {
-                            appearanceMode = appearanceMode.next
-                            applyAppearance()
-                        } label: {
-                            Image(systemName: appearanceMode.icon)
-                        }
-                        .help(appearanceMode.helpText)
                     }
                 }
             }
@@ -443,6 +437,7 @@ struct ContentView: View {
                     startCard(cardId: card.id)
                 }
             },
+            onEdit: { editingCardId = card.id },
             onRename: { name in
                 store.dispatch(.renameCard(cardId: card.id, name: name))
             },
@@ -587,13 +582,22 @@ struct ContentView: View {
                     // Normal: kanban board with overlay detail panel (doesn't shift board columns)
                     boardView
                         .ignoresSafeArea(edges: .top)
-                        .overlay(alignment: .trailing) {
+                        .overlay {
                             if store.state.selectedCardId != nil {
-                                inspectorContent
-                                    .frame(width: 800)
-                                    .background(.regularMaterial)
-                                    .shadow(color: .black.opacity(0.18), radius: 20, x: -4)
-                                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                                HStack(spacing: 0) {
+                                    // Transparent backdrop — tap anywhere outside sidebar to dismiss
+                                    Color.clear
+                                        .contentShape(Rectangle())
+                                        .onTapGesture {
+                                            store.dispatch(.selectCard(cardId: nil))
+                                        }
+
+                                    inspectorContent
+                                        .frame(width: 800)
+                                        .background(.regularMaterial)
+                                        .shadow(color: .black.opacity(0.18), radius: 20, x: -4)
+                                }
+                                .transition(.move(edge: .trailing).combined(with: .opacity))
                             }
                         }
                         .animation(.spring(duration: 0.28), value: store.state.selectedCardId)
@@ -685,6 +689,9 @@ struct ContentView: View {
                 NewTaskDialog(
                     isPresented: $showNewTask,
                     projects: store.state.configuredProjects,
+                    discoveredProjectPaths: store.state.discoveredProjectPaths,
+                    onAddProject: addDiscoveredProject(path:),
+                    onAddFromFolder: addProjectViaFolderPicker,
                     defaultProjectPath: store.state.selectedProjectPath,
                     globalRemoteSettings: store.state.globalRemoteSettings,
                     enabledAssistants: assistantRegistry.available,
@@ -717,6 +724,9 @@ struct ContentView: View {
                     NewTaskDialog(
                         isPresented: Binding(get: { editingCardId != nil }, set: { if !$0 { editingCardId = nil } }),
                         projects: store.state.configuredProjects,
+                        discoveredProjectPaths: store.state.discoveredProjectPaths,
+                        onAddProject: addDiscoveredProject(path:),
+                        onAddFromFolder: addProjectViaFolderPicker,
                         defaultProjectPath: card.link.projectPath,
                         globalRemoteSettings: store.state.globalRemoteSettings,
                         enabledAssistants: assistantRegistry.available,
@@ -733,7 +743,7 @@ struct ContentView: View {
                                 cardId: cardId,
                                 name: finalName ?? card.link.name,
                                 object: object,
-                                promptBody: trimmedPrompt.isEmpty ? nil : trimmedPrompt,
+                                promptBody: trimmedPrompt,
                                 projectPath: projectPath
                             ))
                         }
@@ -1100,19 +1110,12 @@ struct ContentView: View {
                         }
                         .help("New task (⌘N)")
 
-                        Button { Task { await store.reconcile() } } label: {
+                        Button { Task { await store.reconcile(showLoadingIndicator: true) } } label: {
                             Image(systemName: "arrow.clockwise")
                         }
                         .disabled(store.state.isLoading)
                         .help("Refresh sessions")
 
-                        Button {
-                            appearanceMode = appearanceMode.next
-                            applyAppearance()
-                        } label: {
-                            Image(systemName: appearanceMode.icon)
-                        }
-                        .help(appearanceMode.helpText)
                     }
 
                 }
@@ -1224,27 +1227,33 @@ struct ContentView: View {
                 }
 
                 ToolbarItem(placement: .primaryAction) {
-                    Button { showTrash = true } label: {
-                        Image(systemName: "trash")
-                    }
-                    .help("Trash (\(store.state.trashedCards.count) items)")
-                    .overlay(alignment: .topTrailing) {
-                        if !store.state.trashedCards.isEmpty {
-                            Circle()
-                                .fill(Color.red)
-                                .frame(width: 8, height: 8)
-                                .offset(x: 3, y: -3)
+                    HStack(spacing: 4) {
+                        Button { showTrash = true } label: {
+                            Image(systemName: "trash")
                         }
-                    }
-                }
+                        .help("Trash (\(store.state.trashedCards.count) items)")
+                        .overlay(alignment: .topTrailing) {
+                            if !store.state.trashedCards.isEmpty {
+                                Circle()
+                                    .fill(Color.red)
+                                    .frame(width: 8, height: 8)
+                                    .offset(x: 3, y: -3)
+                            }
+                        }
 
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-                    } label: {
-                        Image(systemName: "gear")
+                        Button { openSettings() } label: {
+                            Image(systemName: "gear")
+                        }
+                        .help("Settings (⌘,)")
+
+                        Button {
+                            appearanceMode = appearanceMode.next
+                            applyAppearance()
+                        } label: {
+                            Image(systemName: appearanceMode.icon)
+                        }
+                        .help(appearanceMode.helpText)
                     }
-                    .help("Settings (⌘,)")
                 }
 
                 ToolbarSpacer(.fixed, placement: .primaryAction)
@@ -1591,7 +1600,7 @@ struct ContentView: View {
     private var paletteCommands: [CommandItem] {
         var cmds: [CommandItem] = [
             CommandItem("Open Settings", icon: "gear", shortcut: "⌘,") {
-                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                openSettings()
             },
             CommandItem("Toggle View Mode", icon: isExpandedDetail ? "square.split.2x1" : "list.bullet", shortcut: "⌘↩") { [self] in
                 if isExpandedDetail {

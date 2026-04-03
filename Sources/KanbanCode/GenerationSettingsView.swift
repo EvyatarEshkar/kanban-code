@@ -20,9 +20,15 @@ struct GenerationSettingsView: View {
     @AppStorage("generationIncludeClaudeMd") private var includeClaudeMd = true
     @AppStorage("generationIncludeContextMd") private var includeContextMd = false
 
-    @State private var isCreatingContext = false
-    @State private var contextCreated = false
-    @State private var contextError: String? = nil
+    @State private var isCreatingClaudeMd = false
+    @State private var claudeMdCreated = false
+    @State private var claudeMdError: String? = nil
+    @State private var claudeMdStatus: FileStatus? = nil
+
+    @State private var isCreatingContextMd = false
+    @State private var contextMdCreated = false
+    @State private var contextMdError: String? = nil
+    @State private var contextMdStatus: FileStatus? = nil
 
     private let models = [
         ("claude-haiku-4-5-20251001", "Claude Haiku 4.5 (fast, cheap)"),
@@ -67,71 +73,210 @@ struct GenerationSettingsView: View {
                 .font(.caption)
             }
 
-            Section("Context") {
-                Toggle("Include CLAUDE.md from project root", isOn: $includeClaudeMd)
-                Toggle("Include CONTEXT.md from project root", isOn: $includeContextMd)
+            Section("Context Files") {
+                Text("These files are injected into generation requests so the AI can tailor prompts to your project's conventions.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Button {
-                            generateContextMd()
-                        } label: {
-                            HStack(spacing: 6) {
-                                if isCreatingContext {
-                                    ProgressView().controlSize(.small)
-                                }
-                                Text(isCreatingContext ? "Creating…" : "Create CONTEXT.md via Claude Code")
-                            }
-                        }
-                        .disabled(isCreatingContext)
+                // CLAUDE.md row
+                contextFileRow(
+                    fileName: "CLAUDE.md",
+                    toggleBinding: $includeClaudeMd,
+                    status: claudeMdStatus,
+                    isCreating: isCreatingClaudeMd,
+                    justCreated: claudeMdCreated,
+                    error: claudeMdError,
+                    description: "Coding conventions and architecture notes — created manually or by your team.",
+                    onCreate: { generateContextFile(type: .claudeMd) }
+                )
 
-                        if contextCreated {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                        }
-                    }
+                Divider()
 
-                    if let error = contextError {
-                        Text(error)
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    } else {
-                        Text("Runs `claude -p` in the selected project to generate a CONTEXT.md describing the codebase — used by the Generate feature to craft project-aware prompts.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+                // CONTEXT.md row
+                contextFileRow(
+                    fileName: "CONTEXT.md",
+                    toggleBinding: $includeContextMd,
+                    status: contextMdStatus,
+                    isCreating: isCreatingContextMd,
+                    justCreated: contextMdCreated,
+                    error: contextMdError,
+                    description: "AI-generated codebase overview — describes purpose, stack, key directories and conventions.",
+                    onCreate: { generateContextFile(type: .contextMd) }
+                )
             }
         }
         .formStyle(.grouped)
         .frame(width: 520)
+        .onAppear { refreshFileStatuses() }
     }
 
-    private func generateContextMd() {
+    @ViewBuilder
+    private func contextFileRow(
+        fileName: String,
+        toggleBinding: Binding<Bool>,
+        status: FileStatus?,
+        isCreating: Bool,
+        justCreated: Bool,
+        error: String?,
+        description: String,
+        onCreate: @escaping () -> Void
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 8) {
+                Toggle("Include \(fileName)", isOn: toggleBinding)
+
+                Spacer()
+
+                fileStatusBadge(status: status)
+            }
+
+            HStack(spacing: 8) {
+                Button {
+                    onCreate()
+                } label: {
+                    HStack(spacing: 6) {
+                        if isCreating {
+                            ProgressView().controlSize(.small)
+                        }
+                        Text(isCreating
+                             ? "Working…"
+                             : status != nil
+                                ? "Update \(fileName) via Claude Code"
+                                : "Create \(fileName) via Claude Code")
+                    }
+                }
+                .disabled(isCreating)
+
+                if justCreated {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                }
+            }
+
+            if let err = error {
+                Text(err)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            } else {
+                Text(description)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    @ViewBuilder
+    private func fileStatusBadge(status: FileStatus?) -> some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(status != nil ? .green : .secondary.opacity(0.4))
+                .frame(width: 7, height: 7)
+            Text(status.map { "Updated \($0.relativeDate)" } ?? "Not found")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(.secondary.opacity(0.1), in: Capsule())
+    }
+
+    private struct FileStatus {
+        nonisolated(unsafe) private static let formatter: RelativeDateTimeFormatter = {
+            let f = RelativeDateTimeFormatter()
+            f.unitsStyle = .abbreviated
+            return f
+        }()
+
+        let modifiedAt: Date
+        var relativeDate: String {
+            FileStatus.formatter.localizedString(for: modifiedAt, relativeTo: Date())
+        }
+    }
+
+    private func refreshFileStatuses() {
+        guard let path = selectedProjectPath() else { return }
+        claudeMdStatus = fileStatus(at: (path as NSString).appendingPathComponent("CLAUDE.md"))
+        contextMdStatus = fileStatus(at: (path as NSString).appendingPathComponent("CONTEXT.md"))
+    }
+
+    private func fileStatus(at path: String) -> FileStatus? {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+              let modified = attrs[.modificationDate] as? Date else { return nil }
+        return FileStatus(modifiedAt: modified)
+    }
+
+    // MARK: - Generation
+
+    private enum ContextFileType { case claudeMd, contextMd }
+
+    private func generateContextFile(type: ContextFileType) {
         guard let projectPath = selectedProjectPath() else {
-            contextError = "No project selected. Select a project first."
+            switch type {
+            case .claudeMd:  claudeMdError  = "No project selected. Select a project first."
+            case .contextMd: contextMdError = "No project selected. Select a project first."
+            }
             return
         }
-        isCreatingContext = true
-        contextError = nil
-        contextCreated = false
+
+        switch type {
+        case .claudeMd:
+            isCreatingClaudeMd = true
+            claudeMdError = nil
+            claudeMdCreated = false
+        case .contextMd:
+            isCreatingContextMd = true
+            contextMdError = nil
+            contextMdCreated = false
+        }
+
+        let (prompt, outputFile): (String, String) = switch type {
+        case .claudeMd:
+            (
+                "Analyze this codebase and write a concise CLAUDE.md file for Claude Code. Include: build & test commands, high-level architecture, key files and their roles, important conventions, and anything an AI assistant must know before making changes. Be concrete and brief. Do not add obvious advice.",
+                "CLAUDE.md"
+            )
+        case .contextMd:
+            (
+                "Analyze this codebase and write a concise CONTEXT.md file that describes: the project purpose, tech stack, key directories and their roles, important conventions, and anything a new developer (or AI coding assistant) should know before making changes. Be concrete and brief.",
+                "CONTEXT.md"
+            )
+        }
+
         Task {
             do {
-                let prompt = "Analyze this codebase and write a concise CONTEXT.md file that describes: the project purpose, tech stack, key directories and their roles, important conventions, and anything a new developer (or AI coding assistant) should know before making changes. Be concrete and brief."
-                let result = try await runClaudeCode(in: projectPath, prompt: prompt, outputFile: "CONTEXT.md")
+                let result = try await runClaudeCode(in: projectPath, prompt: prompt, outputFile: outputFile)
                 await MainActor.run {
-                    isCreatingContext = false
-                    if result {
-                        contextCreated = true
-                        includeContextMd = true
-                    } else {
-                        contextError = "Claude Code did not produce CONTEXT.md."
+                    switch type {
+                    case .claudeMd:
+                        isCreatingClaudeMd = false
+                        if result {
+                            claudeMdCreated = true
+                            includeClaudeMd = true
+                        } else {
+                            claudeMdError = "Claude Code did not produce \(outputFile)."
+                        }
+                    case .contextMd:
+                        isCreatingContextMd = false
+                        if result {
+                            contextMdCreated = true
+                            includeContextMd = true
+                        } else {
+                            contextMdError = "Claude Code did not produce \(outputFile)."
+                        }
                     }
+                    refreshFileStatuses()
                 }
             } catch {
                 await MainActor.run {
-                    isCreatingContext = false
-                    contextError = error.localizedDescription
+                    switch type {
+                    case .claudeMd:
+                        isCreatingClaudeMd = false
+                        claudeMdError = error.localizedDescription
+                    case .contextMd:
+                        isCreatingContextMd = false
+                        contextMdError = error.localizedDescription
+                    }
                 }
             }
         }

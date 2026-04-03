@@ -32,13 +32,12 @@ struct CardView: View {
                 .font(.app(.body, weight: .medium))
                 .lineLimit(2)
                 .foregroundStyle(.primary)
-                .padding(.trailing, card.column == .backlog ? 36 : 0)
+                .padding(.trailing, card.column == .backlog ? 68 : 0)
 
             // Object
             if let object = card.link.object, !object.isEmpty {
                 Text(object)
                     .font(.app(.callout))
-                    .lineLimit(2)
                     .foregroundStyle(.secondary)
             }
 
@@ -107,18 +106,32 @@ struct CardView: View {
                     .controlSize(.small)
                     .padding(6)
             } else if card.column == .backlog {
-                Button(action: onStart) {
-                    Image(systemName: "play.fill")
-                        .font(.app(size: 10))
-                        .foregroundStyle(Color.green.opacity(0.8))
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 6)
-                        .background(Color.green.opacity(0.08), in: Capsule())
-                        .background(.ultraThinMaterial, in: Capsule())
-                        .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
+                HStack(spacing: 4) {
+                    Button(action: onEdit) {
+                        Image(systemName: "pencil")
+                            .font(.app(size: 10))
+                            .foregroundStyle(Color.primary.opacity(0.5))
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 6)
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .shadow(color: .black.opacity(0.2), radius: 3, y: 1)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Edit task")
+
+                    Button(action: onStart) {
+                        Image(systemName: "play.fill")
+                            .font(.app(size: 10))
+                            .foregroundStyle(Color.green.opacity(0.8))
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 6)
+                            .background(Color.green.opacity(0.08), in: Capsule())
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Start task")
                 }
-                .buttonStyle(.borderless)
-                .help("Start task")
                 .padding(8)
             }
         }

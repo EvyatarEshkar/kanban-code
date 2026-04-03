@@ -541,7 +541,7 @@ public enum Reducer {
             guard var link = state.links[cardId] else { return [] }
             if let name { link.name = name.isEmpty ? nil : name }
             link.object = object
-            if let promptBody { link.promptBody = promptBody.isEmpty ? nil : promptBody }
+            link.promptBody = promptBody?.isEmpty == false ? promptBody : nil
             if let projectPath, !projectPath.isEmpty { link.projectPath = projectPath }
             link.updatedAt = .now
             state.links[cardId] = link
@@ -1498,14 +1498,17 @@ public final class BoardStore: @unchecked Sendable {
     /// Full reconciliation: discover sessions, load links, merge, assign columns.
     /// Replaces BoardState.refresh(). The async work happens here; the state mutation
     /// happens atomically via dispatch(.reconciled(...)).
-    public func reconcile() async {
+    /// - Parameter showLoadingIndicator: When true, sets isLoading=true for the duration.
+    ///   Pass true only for user-triggered refreshes; background auto-reconciles should pass false
+    ///   so the refresh button doesn't visually pulse every few seconds.
+    public func reconcile(showLoadingIndicator: Bool = false) async {
         // Prevent concurrent reconciliation — overlapping calls create orphan cards
         // with different IDs from the same data.
         guard !isReconciling else { return }
         isReconciling = true
         defer { isReconciling = false }
 
-        dispatch(.setLoading(true))
+        if showLoadingIndicator { dispatch(.setLoading(true)) }
         let reconcileStart = ContinuousClock.now
 
         do {

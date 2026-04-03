@@ -4,6 +4,9 @@ import KanbanCodeCore
 struct NewTaskDialog: View {
     @Binding var isPresented: Bool
     var projects: [Project] = []
+    var discoveredProjectPaths: [String] = []
+    var onAddProject: (String) -> Void = { _ in }
+    var onAddFromFolder: () -> Void = {}
     var defaultProjectPath: String?
     var globalRemoteSettings: RemoteSettings?
     var enabledAssistants: [CodingAssistant] = CodingAssistant.allCases
@@ -64,27 +67,8 @@ struct NewTaskDialog: View {
                     .font(.app(.callout))
 
                 // Project picker
-                if projects.isEmpty {
-                    TextField("Project path", text: $customPath)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.app(.caption))
-                        .frame(width: 160)
-                } else {
-                    Picker("", selection: $selectedProjectPath) {
-                        ForEach(projects) { project in
-                            Text(project.name).tag(project.path)
-                        }
-                        Divider()
-                        Text("Custom path...").tag(Self.customPathSentinel)
-                    }
-                    .frame(width: 160)
-                }
-            }
-
-            if selectedProjectPath == Self.customPathSentinel {
-                TextField("Project path", text: $customPath)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.app(.caption))
+                projectPickerMenu
+                    .fixedSize()
             }
 
             // Object field — multiline, same style as prompt
@@ -95,12 +79,11 @@ struct NewTaskDialog: View {
                 PromptEditor(
                     text: $object,
                     placeholder: "What are you working on?",
-                    maxHeight: 200,
+                    maxHeight: 150,
                     submitOnReturn: false,
                     onSubmit: submitForm
                 )
                 .fixedSize(horizontal: false, vertical: true)
-                .frame(minHeight: 80, maxHeight: 200, alignment: .top)
                 .padding(4)
                 .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
             }
@@ -137,12 +120,11 @@ struct NewTaskDialog: View {
             PromptEditor(
                 text: $prompt,
                 placeholder: "Describe what you want \(selectedAssistant.displayName) to do... (optional)",
-                maxHeight: 400,
+                maxHeight: 200,
                 submitOnReturn: false,
                 onSubmit: submitForm
             )
             .fixedSize(horizontal: false, vertical: true)
-            .frame(minHeight: 80, maxHeight: 400, alignment: .top)
             .padding(4)
             .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
 
@@ -370,6 +352,49 @@ struct NewTaskDialog: View {
     }
 
     // MARK: - Computed
+
+    private var projectPickerMenu: some View {
+        let label = resolvedProjectPath.map { ($0 as NSString).lastPathComponent } ?? "No Project"
+        return Menu(label) {
+            // Configured projects
+            if !projects.isEmpty {
+                ForEach(projects.filter(\.visible)) { project in
+                    Button {
+                        selectedProjectPath = project.path
+                    } label: {
+                        HStack {
+                            Text(project.name)
+                            if selectedProjectPath == project.path {
+                                Spacer()
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Discovered projects
+            if !discoveredProjectPaths.isEmpty {
+                Divider()
+                Section("Discovered") {
+                    ForEach(discoveredProjectPaths.prefix(8), id: \.self) { path in
+                        Button {
+                            onAddProject(path)
+                            selectedProjectPath = path
+                        } label: {
+                            Label((path as NSString).lastPathComponent, systemImage: "folder.badge.plus")
+                        }
+                    }
+                }
+            }
+
+            Divider()
+            Button("Add from folder...") {
+                onAddFromFolder()
+            }
+        }
+        .font(.app(.callout))
+    }
 
     private var resolvedProjectPath: String? {
         if projects.isEmpty {

@@ -23,6 +23,7 @@ struct PromptGenerationChat: View {
     @AppStorage("generationIncludeContextMd")  private var includeContextMd = false
 
     @State private var messages: [GenerationMessage] = []
+    @State private var firstMessageContent = ""
     @State private var followUp = ""
     @State private var isLoading = false
     @State private var error: String? = nil
@@ -167,6 +168,7 @@ struct PromptGenerationChat: View {
             }
         }
 
+        firstMessageContent = userContent
         send(userContent, isFirstMessage: true)
     }
 
@@ -212,19 +214,7 @@ struct PromptGenerationChat: View {
             let priorMessages = messages.dropLast() // drop placeholder
             for (i, m) in priorMessages.enumerated() {
                 if i == 0 {
-                    // First display msg is "object"; API got context-enriched version — reconstruct
-                    var content = object
-                    if let path = projectPath {
-                        if includeClaudeMd,
-                           let txt = try? String(contentsOfFile: (path as NSString).appendingPathComponent("CLAUDE.md"), encoding: .utf8) {
-                            content += "\n\n<CLAUDE.md>\n\(txt)\n</CLAUDE.md>"
-                        }
-                        if includeContextMd,
-                           let txt = try? String(contentsOfFile: (path as NSString).appendingPathComponent("CONTEXT.md"), encoding: .utf8) {
-                            content += "\n\n<CONTEXT.md>\n\(txt)\n</CONTEXT.md>"
-                        }
-                    }
-                    apiMessages.append(["role": "user", "content": content])
+                    apiMessages.append(["role": "user", "content": firstMessageContent])
                 } else {
                     apiMessages.append(["role": m.role, "content": m.content])
                 }
