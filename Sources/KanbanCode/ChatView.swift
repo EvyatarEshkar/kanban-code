@@ -21,11 +21,13 @@ struct ChatView: View {
     var onLoadMore: (() -> Void)?
     var onLoadAroundTurn: ((Int) -> Void)?
     var sessionPath: String?
+    var sessionId: String?
     var onFork: (() -> Void)?
     var onCheckpoint: ((ConversationTurn) -> Void)?
     @Binding var draftText: String
     @Binding var draftImages: [Data]
 
+    @State private var contextUsage: ContextUsage?
     @State private var isBusyFromPane = false
     @State private var dismissedBusy = false
     @State private var busyGraceUntil: Date = .distantPast
@@ -80,7 +82,9 @@ struct ChatView: View {
                     assistant: assistant,
                     hasMoreTurns: hasMoreTurns,
                     tmuxSessionName: tmuxSessionName,
+                    sessionId: sessionId,
                     isBusyFromPane: $isBusyFromPane,
+                    contextUsage: $contextUsage,
                     pendingMessage: pendingMessage,
                     onLoadMore: onLoadMore,
                     onLoadAroundTurn: onLoadAroundTurn,
@@ -134,6 +138,7 @@ struct ChatView: View {
                 assistant: assistant,
                 isReady: !isAssistantBusy,
                 cardId: cardId,
+                contextUsage: contextUsage,
                 userMessageHistory: turns.filter { $0.role == "user" }.reversed().compactMap {
                     let text = $0.contentBlocks.compactMap { b in if case .text = b.kind { return b.text } else { return nil } }.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
                     return text.isEmpty ? nil : text
@@ -177,7 +182,9 @@ private struct ChatMessageList: View {
     let assistant: CodingAssistant
     var hasMoreTurns: Bool = false
     var tmuxSessionName: String?
+    var sessionId: String?
     @Binding var isBusyFromPane: Bool
+    @Binding var contextUsage: ContextUsage?
     @State private var pollKick: Int = 0
     @State private var lastBusyDetected: Date = .distantPast
     var pendingMessage: String?
@@ -283,14 +290,31 @@ private struct ChatMessageList: View {
                             .padding(.vertical, 4)
                         } else {
                             let turn = group[0]
+                            // Collect all text from consecutive same-role turns for copy
+                            let groupText: String = {
+                                guard groupInfo[turn.lineNumber] == true else { return "" }
+                                var texts: [String] = []
+                                // Walk backwards from this turn to find all consecutive same-role turns
+                                if let turnIdx = turns.firstIndex(where: { $0.lineNumber == turn.lineNumber }) {
+                                    var i = turnIdx
+                                    while i >= 0 && turns[i].role == turn.role {
+                                        let t = turns[i].contentBlocks
+                                            .filter { if case .text = $0.kind { return true }; return false }
+                                            .map(\.text).joined(separator: "\n")
+                                        if !t.isEmpty { texts.insert(t, at: 0) }
+                                        i -= 1
+                                    }
+                                }
+                                return texts.joined(separator: "\n\n")
+                            }()
                             ChatMessageView(
                                 turn: turn,
                                 assistant: assistant,
                                 toolResultMap: toolResults[turn.lineNumber] ?? [:],
                                 isLastInGroup: groupInfo[turn.lineNumber] ?? true,
-                                onCopy: { text in
+                                onCopy: { _ in
                                     NSPasteboard.general.clearContents()
-                                    NSPasteboard.general.setString(text, forType: .string)
+                                    NSPasteboard.general.setString(groupText, forType: .string)
                                 },
                                 onFork: onFork,
                                 onCheckpoint: onCheckpoint,
@@ -437,6 +461,11 @@ private struct ChatMessageList: View {
                     // Claude hasn't processed the prompt yet, tmux just hasn't caught up.
                     if newBusy != isBusyFromPane && (newBusy || pendingMessage == nil) {
                         isBusyFromPane = newBusy
+                    }
+                    // Poll context usage (lightweight file read, ~200 bytes)
+                    if let sid = sessionId {
+                        let newUsage = ContextUsageReader.read(sessionId: sid)
+                        if newUsage != contextUsage { contextUsage = newUsage }
                     }
                     // Adaptive polling: fast when busy or recently busy, slow when idle.
                     // - Busy/pending/recently busy: 250ms for responsive indicator

@@ -560,6 +560,7 @@ struct ChatInputBar: View {
     let assistant: CodingAssistant
     let isReady: Bool
     var cardId: String = ""
+    var contextUsage: ContextUsage?
     var userMessageHistory: [String] = [] // Most recent first
     var onSend: (String, [String]) -> Void = { _, _ in }
     var onQueuePrompt: ((String, Bool, [String]) -> Void)?
@@ -615,6 +616,10 @@ struct ChatInputBar: View {
                 } // end VStack (images + editor)
 
                 HStack(alignment: .center, spacing: 12) {
+                    if let contextUsage {
+                        ContextDonutView(usage: contextUsage)
+                    }
+
                     if onQueuePrompt != nil {
                         Button { showQueueDialog = true } label: {
                             Image(systemName: "text.badge.plus")
@@ -708,6 +713,52 @@ struct ChatInputBar: View {
             return savedDraft
         }
         return userMessageHistory[historyIndex]
+    }
+}
+
+// MARK: - Context Usage Donut
+
+struct ContextDonutView: View {
+    let usage: ContextUsage
+    @State private var isHovering = false
+
+    private var fraction: Double { min(usage.usedPercentage / 100, 1.0) }
+
+    private func formatTokens(_ count: Int) -> String {
+        if count >= 1_000_000 { return String(format: "%.1fM", Double(count) / 1_000_000) }
+        if count >= 1_000 { return String(format: "%.1fK", Double(count) / 1_000) }
+        return "\(count)"
+    }
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Color.primary.opacity(0.06), lineWidth: 2.5)
+            Circle()
+                .trim(from: 0, to: fraction)
+                .stroke(Color.primary.opacity(0.25), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+        }
+        .frame(width: 16, height: 16)
+        .help("\(String(format: "%.0f", usage.usedPercentage))% context used")
+        .onHover { isHovering = $0 }
+        .popover(isPresented: $isHovering, arrowEdge: .top) {
+            VStack(alignment: .leading, spacing: 4) {
+                let currentTokens = Int(usage.usedPercentage / 100.0 * Double(usage.contextWindowSize))
+                Text("\(String(format: "%.1f", usage.usedPercentage))% · \(formatTokens(currentTokens)) / \(formatTokens(usage.contextWindowSize)) context used")
+                    .fontWeight(.medium)
+                if let model = usage.model, !model.isEmpty {
+                    Text(model)
+                        .foregroundStyle(.secondary)
+                }
+                if let cost = usage.totalCostUsd, cost > 0 {
+                    Text(String(format: "Cost: $%.2f", cost))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .font(.app(.caption))
+            .padding(8)
+        }
     }
 }
 

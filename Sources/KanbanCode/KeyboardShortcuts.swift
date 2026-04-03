@@ -30,6 +30,10 @@ enum AppShortcut: CaseIterable {
     case openPaletteP           // Cmd+P
     case openCommandMode        // Cmd+Shift+P
 
+    // Global actions
+    case newTask                // Cmd+N
+    case openSettings           // Cmd+,
+
     // Detail panel
     case toggleExpanded         // Cmd+Enter (only when palette closed)
     case toggleSidebar          // Cmd+B (only in expanded mode, palette closed)
@@ -49,6 +53,7 @@ enum AppShortcut: CaseIterable {
 
     static var allCases: [AppShortcut] {
         [.openPaletteK, .openPaletteP, .openCommandMode,
+         .newTask, .openSettings,
          .toggleExpanded, .toggleSidebar, .newTerminal, .deepSearch,
          .deselect, .deleteCard, .deleteCardForward,
          .project1, .project2, .project3, .project4, .project5,
@@ -60,6 +65,8 @@ enum AppShortcut: CaseIterable {
         case .openPaletteK: return "k"
         case .openPaletteP: return "p"
         case .openCommandMode: return "p"
+        case .newTask: return "n"
+        case .openSettings: return ","
         case .toggleExpanded, .deepSearch: return .return
         case .toggleSidebar: return "b"
         case .newTerminal: return "t"
@@ -82,6 +89,7 @@ enum AppShortcut: CaseIterable {
         switch self {
         case .openPaletteK, .openPaletteP: return .command
         case .openCommandMode: return [.command, .shift]
+        case .newTask, .openSettings: return .command
         case .toggleExpanded, .deepSearch: return .command
         case .toggleSidebar: return .command
         case .newTerminal: return .command
@@ -91,11 +99,32 @@ enum AppShortcut: CaseIterable {
         }
     }
 
+    /// Human-readable shortcut string derived from key + modifiers (e.g. "⌘N").
+    var displayString: String {
+        var parts = ""
+        if modifiers.contains(.control) { parts += "⌃" }
+        if modifiers.contains(.option) { parts += "⌥" }
+        if modifiers.contains(.shift) { parts += "⇧" }
+        if modifiers.contains(.command) { parts += "⌘" }
+
+        let keyStr: String
+        switch key {
+        case .return: keyStr = "↩"
+        case .escape: keyStr = "⎋"
+        case .delete: keyStr = "⌫"
+        case .deleteForward: keyStr = "⌦"
+        case .space: keyStr = "␣"
+        default: keyStr = String(key.character).uppercased()
+        }
+        return parts + keyStr
+    }
+
     /// Whether this shortcut should be active given the current context.
     func isActive(in ctx: AppShortcutContext) -> Bool {
         switch self {
         // Palette open/close works everywhere
-        case .openPaletteK, .openPaletteP, .openCommandMode:
+        case .openPaletteK, .openPaletteP, .openCommandMode,
+             .newTask, .openSettings:
             return true
 
         // Toggle between kanban and expanded+sidebar mode

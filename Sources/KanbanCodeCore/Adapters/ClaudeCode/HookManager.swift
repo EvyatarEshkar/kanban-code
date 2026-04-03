@@ -122,6 +122,11 @@ public enum HookManager {
 
         let data = try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
         try data.write(to: URL(fileURLWithPath: resolvedSettingsPath))
+
+        // Also install statusline for context tracking (Claude only)
+        if assistant == .claude {
+            try? installStatusLine(for: assistant, settingsPath: resolvedSettingsPath)
+        }
     }
 
     /// Backward-compatible: install Claude hooks only.
@@ -228,6 +233,66 @@ public enum HookManager {
         "$session_id" "$hook_event" "$timestamp" "$transcript" >> "$EVENTS_FILE"
     """
 
+    // MARK: - Statusline
+
+    /// Check if the statusline script is installed for the given assistant.
+    public static func isStatusLineInstalled(for assistant: CodingAssistant = .claude, settingsPath: String? = nil) -> Bool {
+        guard assistant == .claude else { return false }
+        let path = settingsPath ?? defaultSettingsPath(for: assistant)
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let statusLine = root["statusLine"] as? [String: Any],
+              let command = statusLine["command"] as? String else {
+            return false
+        }
+        return command.contains(".kanban-code/statusline.sh")
+    }
+
+    /// Install the statusline script for context tracking.
+    public static func installStatusLine(
+        for assistant: CodingAssistant = .claude,
+        settingsPath: String? = nil,
+        scriptPath: String? = nil
+    ) throws {
+        guard assistant == .claude else { return }
+        let resolvedSettingsPath = settingsPath ?? defaultSettingsPath(for: assistant)
+        let resolvedScriptPath = scriptPath ?? defaultStatusLineScriptPath()
+
+        // Deploy script
+        try deployStatusLineScript(to: resolvedScriptPath)
+
+        // Read existing settings
+        var root: [String: Any]
+        if let data = try? Data(contentsOf: URL(fileURLWithPath: resolvedSettingsPath)),
+           let existing = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            root = existing
+        } else {
+            root = [:]
+        }
+
+        // Check if already installed
+        if let existing = root["statusLine"] as? [String: Any],
+           let cmd = existing["command"] as? String,
+           cmd.contains(".kanban-code/statusline.sh") {
+            return // Already installed
+        }
+
+        root["statusLine"] = [
+            "type": "command",
+            "command": resolvedScriptPath
+        ] as [String: Any]
+
+        // Write back
+        let fm = FileManager.default
+        let dir = (resolvedSettingsPath as NSString).deletingLastPathComponent
+        try fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
+
+        let data = try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: URL(fileURLWithPath: resolvedSettingsPath))
+    }
+
+    // MARK: - Paths
+
     /// Settings file path per assistant.
     public static func defaultSettingsPath(for assistant: CodingAssistant) -> String {
         (NSHomeDirectory() as NSString).appendingPathComponent("\(assistant.configDirName)/settings.json")
@@ -240,4 +305,60 @@ public enum HookManager {
     private static func defaultHookScriptPath() -> String {
         (NSHomeDirectory() as NSString).appendingPathComponent(".kanban-code/hook.sh")
     }
+
+    private static func defaultStatusLineScriptPath() -> String {
+        (NSHomeDirectory() as NSString).appendingPathComponent(".kanban-code/statusline.sh")
+    }
+
+    private static func deployStatusLineScript(to path: String) throws {
+        let fm = FileManager.default
+        let dir = (path as NSString).deletingLastPathComponent
+        try fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
+
+        try statusLineScriptContent.write(toFile: path, atomically: true, encoding: .utf8)
+
+        try fm.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: path
+        )
+    }
+
+    private static let statusLineScriptContent = """
+    #!/usr/bin/env bash
+    # Kanban Code statusline — captures context/token usage per session.
+    # Claude Code sends JSON via stdin after each assistant response.
+    # We write a summary to ~/.kanban-code/context/<session_id>.json
+    # and output a short status for the terminal.
+
+    set -euo pipefail
+
+    CONTEXT_DIR="${HOME}/.kanban-code/context"
+    mkdir -p "$CONTEXT_DIR"
+
+    input=$(cat)
+
+    # Extract session_id
+    session_id=$(echo "$input" | grep -oE '"session_id":"[^"]*"' | head -1 | cut -d'"' -f4)
+    [ -z "$session_id" ] && exit 0
+
+    # Extract context window fields
+    used_pct=$(echo "$input" | grep -oE '"used_percentage":[0-9.]+' | head -1 | cut -d: -f2)
+    ctx_size=$(echo "$input" | grep -oE '"context_window_size":[0-9]+' | head -1 | cut -d: -f2)
+    input_tokens=$(echo "$input" | grep -oE '"total_input_tokens":[0-9]+' | head -1 | cut -d: -f2)
+    output_tokens=$(echo "$input" | grep -oE '"total_output_tokens":[0-9]+' | head -1 | cut -d: -f2)
+
+    # Extract cost and model
+    cost=$(echo "$input" | grep -oE '"total_cost_usd":[0-9.]+' | head -1 | cut -d: -f2)
+    model=$(echo "$input" | grep -oE '"display_name":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+    # Write context file (atomic via temp + mv)
+    tmp_file="${CONTEXT_DIR}/.${session_id}.tmp"
+    out_file="${CONTEXT_DIR}/${session_id}.json"
+    printf '{"usedPercentage":%s,"contextWindowSize":%s,"totalInputTokens":%s,"totalOutputTokens":%s,"totalCostUsd":%s,"model":"%s"}' \\
+        "${used_pct:-0}" "${ctx_size:-0}" "${input_tokens:-0}" "${output_tokens:-0}" "${cost:-0}" "${model:-}" > "$tmp_file"
+    mv -f "$tmp_file" "$out_file"
+
+    # Empty output — data is consumed by Kanban Code, not displayed in terminal
+    printf ''
+    """
 }

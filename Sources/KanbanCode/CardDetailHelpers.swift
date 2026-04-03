@@ -8,6 +8,285 @@ final class ActionsMenuProvider {
     var builder: (() -> NSMenu)?
 }
 
+/// Unified context menu content for all card action menus (kanban cards,
+/// list sidebar, drawer toolbar). Ensures every entry point shows the same
+/// actions with the same state.
+struct CardActionsMenu: View {
+    let card: KanbanCodeCard
+    var showBranchInfo = false
+    var githubBaseURL: String?
+
+    // Actions
+    var onStart: () -> Void = {}
+    var onResume: () -> Void = {}
+    var onFork: (_ keepWorktree: Bool) -> Void = { _ in }
+    var onRenameRequest: () -> Void = {}
+    var onCopyResumeCmd: () -> Void = {}
+    var onCheckpoint: (() -> Void)?
+    /// Opens the Add Link popover. When nil, posts a notification instead
+    /// (used by kanban/list menus where the sheet lives on ContentView).
+    var onAddLink: (() -> Void)?
+    var onUnlink: ((Action.LinkType) -> Void)?
+    var onDiscover: (() -> Void)?
+    var onCleanupWorktree: (() -> Void)?
+    var canCleanupWorktree: Bool = true
+    var onEdit: (() -> Void)?
+    var onArchive: (() -> Void)?
+    var onTrash: (() -> Void)?
+    var onDelete: () -> Void = {}
+    var availableProjects: [(name: String, path: String)] = []
+    var onMoveToProject: (String) -> Void = { _ in }
+    var onMoveToFolder: () -> Void = {}
+    var enabledAssistants: [CodingAssistant] = []
+    var onMigrateAssistant: (CodingAssistant) -> Void = { _ in }
+
+    var body: some View {
+        // Branch / PR / Issue info (expanded detail only)
+        if showBranchInfo {
+            branchSection
+        }
+
+        // Primary actions
+        primaryActions
+
+        Divider()
+
+        // Copy section
+        copySection
+
+        // Links section (Open PR / Issue)
+        linksSection
+
+        // Discover Branch
+        if let onDiscover, card.link.sessionLink != nil || card.link.worktreeLink != nil {
+            Divider()
+            Button(action: onDiscover) {
+                Label("Discover Branch", systemImage: "arrow.triangle.pull")
+            }
+        }
+
+        // Cleanup Worktree
+        if let onCleanupWorktree, card.link.worktreeLink != nil, canCleanupWorktree {
+            Divider()
+            Button(role: .destructive, action: onCleanupWorktree) {
+                Label("Cleanup Worktree", systemImage: "trash")
+            }
+        }
+
+        // Move / Migrate submenus
+        moveAndMigrateSection
+
+        // Edit
+        if let onEdit {
+            Divider()
+            Button(action: onEdit) {
+                Label("Edit", systemImage: "pencil")
+            }
+        }
+
+        // Delete / Archive / Trash
+        Divider()
+        if card.link.manuallyArchived {
+            if card.link.source != .githubIssue {
+                Button(role: .destructive, action: onDelete) {
+                    Label("Delete Card", systemImage: "trash")
+                }
+            }
+        } else if let onArchive {
+            Button(action: onArchive) {
+                Label("Archive", systemImage: "archivebox")
+            }
+            if card.link.source != .githubIssue, let onTrash {
+                Button(role: .destructive, action: onTrash) {
+                    Label("Remove", systemImage: "minus.circle")
+                }
+            }
+        } else {
+            Button(role: .destructive, action: onDelete) {
+                Label("Delete Card", systemImage: "trash")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var branchSection: some View {
+        if let branch = card.link.worktreeLink?.branch ?? card.link.discoveredBranches?.first, !branch.isEmpty {
+            Menu {
+                Button("Copy Branch Name") { copyToClipboard(branch) }
+                if card.link.worktreeLink != nil, let onUnlink {
+                    Button("Unlink Branch") { onUnlink(.worktree) }
+                }
+            } label: {
+                Label("Branch: \(branch)", systemImage: "arrow.triangle.branch")
+            }
+        }
+        ForEach(card.link.prLinks, id: \.number) { pr in
+            let detail = pr.status.map { " · \($0.rawValue)" } ?? ""
+            Menu {
+                if let url = pr.url.flatMap({ URL(string: $0) }) {
+                    Button("Open on GitHub") { NSWorkspace.shared.open(url) }
+                }
+                Button("Copy PR Number") { copyToClipboard("#\(String(pr.number))") }
+                if let onUnlink {
+                    Button("Unlink PR") { onUnlink(.pr(number: pr.number)) }
+                }
+            } label: {
+                Label("PR: #\(String(pr.number))\(detail)", systemImage: "arrow.triangle.pull")
+            }
+        }
+        if let issue = card.link.issueLink {
+            Menu {
+                if let url = (issue.url ?? githubBaseURL.map { GitRemoteResolver.issueURL(base: $0, number: issue.number) }).flatMap({ URL(string: $0) }) {
+                    Button("Open on GitHub") { NSWorkspace.shared.open(url) }
+                }
+                Button("Copy Issue Number") { copyToClipboard("#\(String(issue.number))") }
+                if let onUnlink {
+                    Button("Unlink Issue") { onUnlink(.issue) }
+                }
+            } label: {
+                Label("Issue: #\(String(issue.number))", systemImage: "circle.circle")
+            }
+        }
+        Divider()
+    }
+
+    @ViewBuilder
+    private var primaryActions: some View {
+        if card.column == .backlog {
+            Button(action: onStart) {
+                Label("Start", systemImage: "play.fill")
+            }
+        }
+        if card.column != .backlog {
+            Button(action: onResume) {
+                Label("Resume Session", systemImage: "play.fill")
+            }
+        }
+        Button(action: { onFork(true) }) {
+            Label("Fork Session", systemImage: "arrow.branch")
+        }
+        .disabled(card.link.sessionLink?.sessionPath == nil)
+
+        Button(action: onRenameRequest) {
+            Label("Rename", systemImage: "pencil")
+        }
+
+        if let onCheckpoint {
+            Button(action: onCheckpoint) {
+                Label("Checkpoint / Restore", systemImage: "clock.arrow.circlepath")
+            }
+            .disabled(card.link.sessionLink?.sessionPath == nil)
+        }
+    }
+
+    @ViewBuilder
+    private var copySection: some View {
+        Button(action: onCopyResumeCmd) {
+            Label("Copy Resume Command", systemImage: "doc.on.doc")
+        }
+        Button { copyToClipboard(card.id) } label: {
+            Label("Copy Card ID", systemImage: "number")
+        }
+        if let sessionId = card.link.sessionLink?.sessionId {
+            Button { copyToClipboard(sessionId) } label: {
+                Label("Copy Session ID", systemImage: "desktopcomputer")
+            }
+        }
+        if let sessionPath = card.link.sessionLink?.sessionPath {
+            Button { copyToClipboard(sessionPath) } label: {
+                Label("Copy Session .jsonl Path", systemImage: "doc.text")
+            }
+        }
+        if let tmux = card.link.tmuxLink?.sessionName {
+            Button { copyToClipboard("tmux attach -t \(tmux)") } label: {
+                Label("Copy Tmux Command", systemImage: "terminal")
+            }
+        }
+        if let projectPath = card.link.projectPath {
+            Button { copyToClipboard(projectPath) } label: {
+                Label("Copy Project Path", systemImage: "folder.badge.gearshape")
+            }
+        }
+        if let worktreePath = card.link.worktreeLink?.path, !worktreePath.isEmpty {
+            Button { copyToClipboard(worktreePath) } label: {
+                Label("Copy Worktree Path", systemImage: "folder")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var linksSection: some View {
+        Group {
+            Divider()
+            ForEach(card.link.prLinks, id: \.number) { pr in
+                Button {
+                    if let url = pr.url.flatMap({ URL(string: $0) }) { NSWorkspace.shared.open(url) }
+                } label: {
+                    Label("Open PR #\(String(pr.number))", systemImage: "arrow.up.right.square")
+                }
+            }
+            if let issue = card.link.issueLink {
+                Button {
+                    if let url = (issue.url ?? githubBaseURL.map { GitRemoteResolver.issueURL(base: $0, number: issue.number) }).flatMap({ URL(string: $0) }) {
+                        NSWorkspace.shared.open(url)
+                    }
+                } label: {
+                    Label("Open Issue #\(String(issue.number))", systemImage: "arrow.up.right.square")
+                }
+            }
+            Button {
+                if let onAddLink {
+                    onAddLink()
+                } else {
+                    NotificationCenter.default.post(
+                        name: .kanbanCodeAddLink,
+                        object: nil,
+                        userInfo: ["cardId": card.id]
+                    )
+                }
+            } label: {
+                Label("Add Link", systemImage: "plus")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var moveAndMigrateSection: some View {
+        if card.link.sessionLink != nil {
+            let currentPath = card.link.projectPath
+            let otherProjects = availableProjects.filter { $0.path != currentPath }
+            Divider()
+            Menu {
+                ForEach(otherProjects, id: \.path) { project in
+                    Button(project.name) { onMoveToProject(project.path) }
+                }
+                if !otherProjects.isEmpty { Divider() }
+                Button("Select Folder...") { onMoveToFolder() }
+            } label: {
+                Label("Move to Project", systemImage: "folder.badge.arrow.forward")
+            }
+        }
+        if card.link.sessionLink != nil {
+            let migrationTargets = enabledAssistants.filter { $0 != card.link.effectiveAssistant }
+            if !migrationTargets.isEmpty {
+                Divider()
+                Menu {
+                    ForEach(migrationTargets, id: \.rawValue) { target in
+                        Button(target.displayName) { onMigrateAssistant(target) }
+                    }
+                } label: {
+                    Label("Migrate to Assistant", systemImage: "arrow.triangle.swap")
+                }
+            }
+        }
+    }
+
+    private func copyToClipboard(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+}
+
 enum DetailTab: String {
     case terminal, history, issue, pullRequest, prompt
 

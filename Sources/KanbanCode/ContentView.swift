@@ -75,6 +75,9 @@ struct ContentView: View {
     @State var isDroppingFolder = false
     @State var isDroppingImage = false
     @State var addFromPathText = ""
+    @State var renamingCardId: String?
+    @State var pendingTerminalSession: String?
+    @State var showAddLinkCardId: String?
     @State var launchConfig: LaunchConfig?
     @State var syncStatuses: [String: SyncStatus] = [:]
     @State var isSyncRefreshing = false
@@ -295,7 +298,7 @@ struct ContentView: View {
             store: store,
             onStartCard: { cardId in startCard(cardId: cardId) },
             onResumeCard: { cardId in resumeCard(cardId: cardId) },
-            onForkCard: { cardId in store.dispatch(.showDialog(.confirmFork(cardId: cardId))) },
+            onForkCard: { cardId, _ in store.dispatch(.showDialog(.confirmFork(cardId: cardId))) },
             onCopyResumeCmd: { cardId in
                 guard let card = store.state.cards.first(where: { $0.id == cardId }) else { return }
                 var cmd = ""
@@ -307,6 +310,16 @@ struct ContentView: View {
                 }
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(cmd, forType: .string)
+            },
+            onDiscoverCard: { cardId in
+                Task {
+                    store.dispatch(.setBusy(cardId: cardId, busy: true))
+                    if let updatedLink = await orchestrator.discoverBranchesForCard(cardId: cardId) {
+                        store.dispatch(.createManualTask(updatedLink))
+                    }
+                    await store.reconcile()
+                    store.dispatch(.setBusy(cardId: cardId, busy: false))
+                }
             },
             onCleanupWorktree: { cardId in Task { await cleanupWorktree(cardId: cardId) } },
             canCleanupWorktree: { cardId in
@@ -353,7 +366,7 @@ struct ContentView: View {
             store: store,
             onStartCard: { cardId in startCard(cardId: cardId) },
             onResumeCard: { cardId in resumeCard(cardId: cardId) },
-            onForkCard: { cardId in store.dispatch(.showDialog(.confirmFork(cardId: cardId))) },
+            onForkCard: { cardId, _ in store.dispatch(.showDialog(.confirmFork(cardId: cardId))) },
             onCopyResumeCmd: { cardId in
                 guard let card = store.state.cards.first(where: { $0.id == cardId }) else { return }
                 var cmd = ""
@@ -365,6 +378,16 @@ struct ContentView: View {
                 }
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(cmd, forType: .string)
+            },
+            onDiscoverCard: { cardId in
+                Task {
+                    store.dispatch(.setBusy(cardId: cardId, busy: true))
+                    if let updatedLink = await orchestrator.discoverBranchesForCard(cardId: cardId) {
+                        store.dispatch(.createManualTask(updatedLink))
+                    }
+                    await store.reconcile()
+                    store.dispatch(.setBusy(cardId: cardId, busy: false))
+                }
             },
             onCleanupWorktree: { cardId in Task { await cleanupWorktree(cardId: cardId) } },
             canCleanupWorktree: { cardId in
@@ -385,6 +408,9 @@ struct ContentView: View {
             },
             onRefreshBacklog: { Task { await store.refreshBacklog() } },
             onDropCard: { cardId, column in handleDrop(cardId: cardId, to: column) },
+            onMergeCards: { sourceId, targetId in
+                store.dispatch(.mergeCards(sourceId: sourceId, targetId: targetId))
+            },
             canDropCard: { card, column in
                 CardDropIntent.resolve(card, to: column).isAllowed
             },
@@ -430,6 +456,7 @@ struct ContentView: View {
             card: card,
             sessionStore: assistantRegistry.store(for: card.link.effectiveAssistant) ?? store.sessionStore,
             selectedTab: $detailTab,
+            pendingTerminalSession: $pendingTerminalSession,
             onResume: {
                 if card.link.sessionLink != nil {
                     resumeCard(cardId: card.id)
@@ -788,14 +815,49 @@ struct ContentView: View {
                     }
                 )
             }
+            .sheet(isPresented: Binding(
+                get: { renamingCardId != nil },
+                set: { if !$0 { renamingCardId = nil } }
+            )) {
+                if let cardId = renamingCardId, let card = store.state.cards.first(where: { $0.id == cardId }) {
+                    RenameSessionDialog(
+                        currentName: card.link.name ?? card.displayTitle,
+                        isPresented: Binding(get: { renamingCardId != nil }, set: { if !$0 { renamingCardId = nil } }),
+                        onRename: { name in store.dispatch(.renameCard(cardId: cardId, name: name)) }
+                    )
+                }
+            }
             .sheet(isPresented: $showProcessManager) {
                 ProcessManagerView(
                     store: store,
                     isPresented: $showProcessManager,
-                    onSelectCard: { cardId in
+                    onSelectCard: { cardId, terminalSession in
                         store.dispatch(.selectCard(cardId: cardId))
+                        pendingTerminalSession = terminalSession
+                        shouldFocusTerminal = true
                     }
                 )
+            }
+            .popover(isPresented: Binding(
+                get: { showAddLinkCardId != nil },
+                set: { if !$0 { showAddLinkCardId = nil } }
+            )) {
+                if let cardId = showAddLinkCardId {
+                    AddLinkPopover(
+                        onAddBranch: { branch in
+                            store.dispatch(.addBranchToCard(cardId: cardId, branch: branch))
+                            showAddLinkCardId = nil
+                        },
+                        onAddIssue: { number in
+                            store.dispatch(.addIssueLinkToCard(cardId: cardId, issueNumber: number))
+                            showAddLinkCardId = nil
+                        },
+                        onAddPR: { number in
+                            store.dispatch(.addPRToCard(cardId: cardId, prNumber: number))
+                            showAddLinkCardId = nil
+                        }
+                    )
+                }
             }
     }
 
@@ -1039,6 +1101,16 @@ struct ContentView: View {
                     store.dispatch(.selectCard(cardId: cardId))
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: .kanbanCodeOpenProject)) { notification in
+                if let path = notification.userInfo?["path"] as? String {
+                    openOrCreateProject(path: path)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .kanbanCodeAddLink)) { notification in
+                if let cardId = notification.userInfo?["cardId"] as? String {
+                    showAddLinkCardId = cardId
+                }
+            }
             .onReceive(NotificationCenter.default.publisher(for: .kanbanCodeSettingsChanged)) { _ in
                 Task {
                     await store.loadSettingsAndCache()
@@ -1222,7 +1294,9 @@ struct ContentView: View {
                     }
 
                     ToolbarItem(placement: .primaryAction) {
-                        expandedActionsMenu
+                        if let card = store.state.selectedCard {
+                            expandedActionsMenu(for: card)
+                        }
                     }
                 }
 
@@ -1599,10 +1673,10 @@ struct ContentView: View {
 
     private var paletteCommands: [CommandItem] {
         var cmds: [CommandItem] = [
-            CommandItem("Open Settings", icon: "gear", shortcut: "⌘,") {
+            CommandItem("Open Settings", icon: "gear", shortcut: AppShortcut.openSettings.displayString) {
                 openSettings()
             },
-            CommandItem("Toggle View Mode", icon: isExpandedDetail ? "square.split.2x1" : "list.bullet", shortcut: "⌘↩") { [self] in
+            CommandItem("Toggle View Mode", icon: isExpandedDetail ? "square.split.2x1" : "list.bullet", shortcut: AppShortcut.toggleExpanded.displayString) { [self] in
                 if isExpandedDetail {
                     isExpandedDetail = false
                     boardViewModeRaw = BoardViewMode.kanban.rawValue
@@ -1612,7 +1686,7 @@ struct ContentView: View {
                     boardViewModeRaw = BoardViewMode.list.rawValue
                 }
             },
-            CommandItem("New Task", icon: "plus", shortcut: "⌘N") { [self] in
+            CommandItem("New Task", icon: "plus", shortcut: AppShortcut.newTask.displayString) { [self] in
                 presentNewTask()
             },
         ]
@@ -1620,11 +1694,12 @@ struct ContentView: View {
         // Project switching
         let visibleProjects = store.state.configuredProjects.filter(\.visible)
         if !visibleProjects.isEmpty {
-            cmds.append(CommandItem("Show All Projects", icon: "folder", shortcut: "⌘1") { [self] in
+            cmds.append(CommandItem("Show All Projects", icon: "folder", shortcut: AppShortcut.project1.displayString) { [self] in
                 setSelectedProject(nil)
             })
             for (i, project) in visibleProjects.enumerated() {
-                let shortcut = i < 8 ? "⌘\(i + 2)" : nil
+                let projectShortcuts: [AppShortcut] = [.project2, .project3, .project4, .project5, .project6, .project7, .project8, .project9]
+                let shortcut = i < projectShortcuts.count ? projectShortcuts[i].displayString : nil
                 let path = project.path
                 cmds.append(CommandItem("Switch to \(project.name)", icon: "folder", shortcut: shortcut) { [self] in
                     setSelectedProject(path)
@@ -1774,41 +1849,50 @@ struct ContentView: View {
 
     // MARK: - Expanded Actions Menu
 
-    /// Builds a SwiftUI Menu from CardDetailView's NSMenu builder, reusing icons and items.
-    private var expandedActionsMenu: some View {
+    private func expandedActionsMenu(for card: KanbanCodeCard) -> some View {
         Menu {
-            if let menu = actionsMenuProvider.builder?() {
-                ForEach(Array(menu.items.enumerated()), id: \.offset) { _, item in
-                    if item.isSeparatorItem {
-                        Divider()
-                    } else if let submenu = item.submenu {
-                        Menu(item.title) {
-                            ForEach(Array(submenu.items.enumerated()), id: \.offset) { _, sub in
-                                Button {
-                                    (sub.representedObject as? NSMenuActionItem)?.invoke()
-                                } label: {
-                                    if let img = sub.image {
-                                        Label { Text(sub.title) } icon: { Image(nsImage: img) }
-                                    } else {
-                                        Text(sub.title)
-                                    }
-                                }
-                            }
+            CardActionsMenu(
+                card: card,
+                showBranchInfo: true,
+                onStart: { startCard(cardId: card.id) },
+                onResume: { resumeCard(cardId: card.id) },
+                onFork: { keepWorktree in forkCard(cardId: card.id, keepWorktree: keepWorktree) },
+                onRenameRequest: { renamingCardId = card.id },
+                onCopyResumeCmd: {
+                    var cmd = ""
+                    if let pp = card.link.projectPath { cmd += "cd \(pp) && " }
+                    if let sid = card.link.sessionLink?.sessionId { cmd += "claude --resume \(sid)" }
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(cmd, forType: .string)
+                },
+                onCheckpoint: {
+                    detailTab = .history
+                    // CardDetailView picks up checkpointMode from its own menu
+                    // but from here we just navigate to history tab
+                },
+                onAddLink: { showAddLinkCardId = card.id },
+                onUnlink: { linkType in store.dispatch(.unlinkFromCard(cardId: card.id, linkType: linkType)) },
+                onDiscover: {
+                    Task {
+                        store.dispatch(.setBusy(cardId: card.id, busy: true))
+                        if let updatedLink = await orchestrator.discoverBranchesForCard(cardId: card.id) {
+                            store.dispatch(.createManualTask(updatedLink))
                         }
-                    } else {
-                        Button {
-                            (item.representedObject as? NSMenuActionItem)?.invoke()
-                        } label: {
-                            if let img = item.image {
-                                Label { Text(item.title) } icon: { Image(nsImage: img) }
-                            } else {
-                                Text(item.title)
-                            }
-                        }
-                        .disabled(!item.isEnabled)
+                        await store.reconcile()
+                        store.dispatch(.setBusy(cardId: card.id, busy: false))
                     }
+                },
+                onCleanupWorktree: { Task { await cleanupWorktree(cardId: card.id) } },
+                canCleanupWorktree: canCleanupWorktree(for: card),
+                onDelete: { store.dispatch(.showDialog(.confirmDelete(cardId: card.id))) },
+                availableProjects: projectList,
+                onMoveToProject: { path in store.dispatch(.moveCardToProject(cardId: card.id, projectPath: path)) },
+                onMoveToFolder: { selectFolderForMove(cardId: card.id) },
+                enabledAssistants: assistantRegistry.available,
+                onMigrateAssistant: { target in
+                    store.dispatch(.showDialog(.confirmMigration(cardId: card.id, targetAssistant: target)))
                 }
-            }
+            )
         } label: {
             Image(systemName: "ellipsis")
         }
@@ -2045,6 +2129,24 @@ struct ContentView: View {
             await store.loadSettingsAndCache()
             await store.reconcile()
             setSelectedProject(path)
+        }
+    }
+
+    /// Open a project by path — select it if it exists, otherwise create and select it.
+    /// Called from the `kanban` CLI via file-based IPC.
+    private func openOrCreateProject(path: String) {
+        // Check if project already exists (match by path or repoRoot)
+        if store.state.configuredProjects.contains(where: { $0.path == path || $0.repoRoot == path }) {
+            setSelectedProject(path)
+            return
+        }
+        // Project doesn't exist — create it, select first to avoid empty flash
+        let project = Project(path: path)
+        setSelectedProject(path)
+        Task {
+            try? await settingsStore.addProject(project)
+            await store.loadSettingsAndCache()
+            await store.reconcile()
         }
     }
 
